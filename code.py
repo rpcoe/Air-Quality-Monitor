@@ -1,7 +1,8 @@
 #import WeatherMonitorTest
 #import Blink_Led
- 
-import WeatherMonitorSave
+
+#import WeatherMonitorSave
+#import ReadSDCard
 
 #import SDCardTest
-import ReadSDCard
+import sd_read_simpletest
