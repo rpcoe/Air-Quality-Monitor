@@ -32,11 +32,12 @@ vfs = storage.VfsFat(sdcard)
 storage.mount(vfs, "/sd")
 
 
-"""
-with open("/sd/indexfile.txt", "w") as writefile:   #  uncomment this section to clear file and start new one each run
+
+#  uncomment this section out to start a new index file each run
+with open("/sd/indexfile.txt", "w") as writefile:   
     print( 0, file=writefile)
     writefile.close()
-"""
+
 with open("/sd/indexfile.txt", "r") as inputfile:
     for line in inputfile:
         i= line
@@ -47,31 +48,31 @@ with open("/sd/indexfile.txt", "r") as inputfile:
 file_name = "/sd/history"+str(index)+".txt"
 print("\nfilename:", file_name)
 
-with open("/sd/indexfile.txt", "w") as writefile:        # Uncomment this section to start a new index file from 0
+ # start a new index file from 0
+ #comment this out to start a new index file saving the data from previous runs
+with open("/sd/indexfile.txt", "w") as writefile:       
     print(str(index), file=writefile)
-    #print(str(0)+"\n", file=writefile)
     writefile.close()
 
 
 
-initPressure = bme280.pressure
+
 with open(file_name, "a") as appendfile:        
     print("                                       NEW DATA", file=appendfile)
-    print("Initial Pressure:  %0.1f hPa" % bme280.pressure, file=appendfile)
-    print("TIME ,,   TEMP. ,,  Humidity,,   Pressure,,     ALTITUDE", file=appendfile)
+    #print("Initial Pressure:  %0.1f hPa" % bme280.pressure, file=appendfile)
+    print("TIME ,,   TEMP. ,,  Humidity,,   Pressure,", file=appendfile)
     appendfile.close
 
 time = 0
 while True:
-    altitude = (initPressure - bme280.pressure  ) * 27.331
-    print("\nTemperature: %0.1f C" % bme280.temperature)
+    tempF = bme280.temperature * 9 / 5 + 32
+    print("\nTemperature: %0.1f F" % tempF)
     print("Humidity: %0.1f %%" % bme280.relative_humidity)
     print("Pressure: %0.1f hPa" % bme280.pressure)
-    print("Altitude: %0.f feet" % altitude)
 
     with open(file_name, "a") as appendfile:        
-        print("%4.0f,"% time,"Sec,", "%0.1f,"% bme280.temperature, "C,"," %0.1f ," % bme280.relative_humidity, 
-              "%,", "%0.1f," % bme280.pressure, "hPa,"," %4.f ," % altitude, "feet", file=appendfile)
+        print("%4.0f,"% time,"Sec,", "%0.1f,"% tempF, "F,"," %0.1f ," % bme280.relative_humidity, 
+              "%,", "%0.1f," % bme280.pressure, "hPa,", file=appendfile)
     appendfile.close
 
     led.value = True
