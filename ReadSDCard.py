@@ -11,12 +11,14 @@ import adafruit_sdcard
 from time import sleep
 # Use any pin that is not taken by SPI
 SD_CS = board.GP17
- 
+
 # Connect to the card and mount the filesystem.
 spi = io.SPI(board.GP18, board.GP19, board.GP16)
 cs = digitalio.DigitalInOut(SD_CS)
 sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
+if not 'sd' in os.listdir('/'):
+    os.mkdir('/sd') 
 storage.mount(vfs, "/sd") 
 
 

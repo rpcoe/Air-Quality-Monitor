@@ -17,7 +17,6 @@ import adafruit_sdcard
 #     The Adafruit Feather M0 Adalogger use board.SD_CS
 #     For the breakout boards use any pin that is not taken by SPI
 
-#SD_CS = board.SD_CS  # setup for M0 Adalogger; change as needed
 
 # Connect to the card and mount the filesystem.
 #SD_CS = board.GP17
