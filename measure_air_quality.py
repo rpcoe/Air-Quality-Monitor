@@ -16,17 +16,15 @@ led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 
 # Create sensor object, using the board's default I2C bus.
-#i2c = busio.I2C(board.GP1, board.GP0)  # SCL, SDA
 i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
 
 # address can change based on bme device
 # if 0x76 does not work try 0x77 :)
 bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
 
-SD_CS = board.GP17
 # Connect to the card and mount the filesystem.
-spi = busio.SPI(board.GP18, board.GP19, board.GP16)
-cs = digitalio.DigitalInOut(SD_CS)
+spi = busio.SPI(board.GP18, board.GP19, board.GP16)  # SCK, MOSI, MISO
+cs = digitalio.DigitalInOut(board.GP17)  # CS pin for SD card
 sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
 storage.mount(vfs, "/sd")
@@ -43,7 +41,7 @@ with open("/sd/indexfile.txt", "r") as inputfile:
         i= line
         #print(i)
     inputfile.close
-    index = int(i[0]) +1   # Increment index to start a new file
+    index = int(line.strip()) + 1  # Increment index to start a new file
     print("\nindex =",index)
 file_name = "/sd/history"+str(index)+".txt"
 print("\nfilename:", file_name)
@@ -56,28 +54,37 @@ with open("/sd/indexfile.txt", "w") as writefile:
 
 
 
+# Open the new history file in append mode ('a')
+# We write the header first
+with open(file_name, "a") as f:
+    f.write("Time(s), Temp(°F), Humidity(%), Pressure(inHg)\n")
 
-with open(file_name, "a") as appendfile:        
-    print("                                       NEW DATA", file=appendfile)
-    #print("Initial Pressure:  %0.1f hPa" % bme280.pressure, file=appendfile)
-    print("TIME ,,   TEMP. ,,  Humidity,,   Pressure,", file=appendfile)
-    appendfile.close
+print("Logging started. Press Ctrl+C to stop.\n")
 
-time = 0
+
+total_time = 0
 while True:
-    tempF = bme280.temperature * 9 / 5 + 32
-    print("\nTemperature: %0.1f F" % tempF)
-    print("Humidity: %0.1f %%" % bme280.relative_humidity)
-    print("Pressure: %0.1f hPa" % bme280.pressure)
+    try:
+        # Flash LED to show activity
+        led.value = True
+        sleep(ledTime)
+        led.value = False
 
-    with open(file_name, "a") as appendfile:        
-        print("%4.0f,"% time,"Sec,", "%0.1f,"% tempF, "F,"," %0.1f ," % bme280.relative_humidity, 
-              "%,", "%0.1f," % bme280.pressure, "hPa,", file=appendfile)
-    appendfile.close
+        # Gather data from BME280 
+        temp = bme280.temperature* 9 / 5 + 32
+        humidity = bme280.relative_humidity
+        pressure = bme280.pressure * 0.02953  # Convert hPa to inHg
 
-    led.value = True
-    sleep(ledTime)
-    led.value = False
-    
-    sleep(timeIncrement-ledTime)
-    time += timeIncrement
+        # Append data to the SD card file
+        with open(file_name, "a") as f:
+            data_string = f"{total_time}, {temp:.2f}, {humidity:.2f}, {pressure:.2f}\n"
+            f.write(data_string)
+            print("Time, Temp(°F), Humidity(%), Pressure(inHg):", data_string.strip())
+
+        # Wait for the next increment
+        sleep(timeIncrement - ledTime)
+        total_time += timeIncrement
+
+    except OSError as e:
+        print("SD card error or sensor unplugged:", e)
+        break
