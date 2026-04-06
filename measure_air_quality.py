@@ -15,7 +15,7 @@ from adafruit_bme280 import basic as adafruit_bme280
 from adafruit_httpserver import Server, Request, Response, POST
 
 
-timeIncrement = 10  # Set the time increment in seconds
+timeIncrement = 30  # Set the time increment in seconds
 ledTime = .01       # time that the led is flashing each cycle
 
 led = digitalio.DigitalInOut(board.LED)
@@ -34,16 +34,15 @@ cs = digitalio.DigitalInOut(board.GP17)  # CS pin for SD card
 sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
 storage.mount(vfs, "/sd")
-#file_name = "/sd/history"+str(index)+".txt"  # file_name needs to be global to be used in the server route
-#file_name = "/sd/history1.txt"
 
 
 
-#  uncomment this section out to start a new index file each run
+#  uncomment this section to stop starting a new index file each run
+"""
 with open("/sd/indexfile.txt", "w") as writefile:   
     print( 0, file=writefile)
     writefile.close()
-
+"""
 with open("/sd/indexfile.txt", "r") as inputfile:
     for line in inputfile:
         i= line
@@ -62,11 +61,10 @@ with open("/sd/indexfile.txt", "w") as writefile:
     writefile.close()
 
 
-
 # Open the new history file in append mode ('a')
 # We write the header first
 with open(file_name, "w") as f:
-    f.write("Time(s), Temp(°F), Humidity(%), Pressure(inHg)\n")
+    f.write(f"Time(s), Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
 
 print("Logging started. Press Ctrl+C to stop.\n")
 
@@ -100,7 +98,7 @@ def base(request: Request):
     return Response(request, f"<html><body><h1>Pico W Data Logger</h1><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
 
 async def log_data():
-    """Task to log data every 10 seconds."""
+    """Task to log data every {timeIncrement} seconds."""
     total_time = 0
     while True:
         temp = bme280.temperature * 9 / 5 + 32  # Convert to Fahrenheit
