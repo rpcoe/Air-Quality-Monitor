@@ -49,7 +49,7 @@ with open("/sd/indexfile.txt", "r") as inputfile:
         #print(i)
     inputfile.close
     index = int(line.strip()) + 1  # Increment index to start a new file
-    print("\nindex =",index)
+    #print("\nindex =",index)
     file_name = "/sd/history"+str(index)+".txt"  # file_name needs to be global to be used in the server route
 
 print("\nfilename:", file_name)
