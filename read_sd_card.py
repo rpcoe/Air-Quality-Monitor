@@ -9,38 +9,37 @@ import storage
 import adafruit_sdcard
 #import microcontroller
 from time import sleep
-# Use any pin that is not taken by SPI
-SD_CS = board.GP17
 
 # Connect to the card and mount the filesystem.
-spi = io.SPI(board.GP18, board.GP19, board.GP16)
-cs = digitalio.DigitalInOut(SD_CS)
+spi = io.SPI(board.GP18, board.GP19, board.GP16)    # SCK, MOSI, MISO
+cs = digitalio.DigitalInOut(board.GP17)             # CS pin for SD card
 sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
 
-storage.mount(vfs, "/sd") 
+storage.mount(vfs, "/sd")
 
-
-"""with open("/sd/indexfile.txt", "w") as writefile:        # Uncomment this section to start a new index file from 1
-    print(str(1), file=writefile)
-    writefile.close()
-"""
 
 with open("/sd/indexfile.txt", "r") as inputfile:
     for line in inputfile:
         i= line
         #print(i)
     inputfile.close
-    index = int(i[0])
-    print("\nindex =",index)
-file_name = "/sd/history"+str(index)+".txt"
-print("\nfilename:", file_name)
+    index = int(line.strip())
+    print("\nLast File Index =",index)
 
-#while True:
+while True:
+    file_name = "/sd/history"+str(index)+".txt"
+    print("\nfilename:", file_name)
 
-with open(file_name, "r") as inputfile:      
-    for line in inputfile:
-        print(line)
-    inputfile.close    
+
+    with open(file_name, "r") as inputfile:      
+        for line in inputfile:
+            print(line)
+        inputfile.close    
+    #sleep(1)  # Need to input a new index # to read a different file
+    print("Enter a new file index to display:")
+    index = input() 
+    #print(f"Index changed to: {index}")
+    print("Index changed to: index =", index)
 
 print("stopped")
