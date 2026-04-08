@@ -10,12 +10,14 @@ import digitalio
 import board
 import storage
 import adafruit_sdcard
+import adafruit_ntp
+import rtc
 
 from adafruit_bme280 import basic as adafruit_bme280
 from adafruit_httpserver import Server, Request, Response, POST
 
 
-timeIncrement = 30  # Set the time increment in seconds
+timeIncrement = 1  # Set the time increment in seconds
 ledTime = .01       # time that the led is flashing each cycle
 
 led = digitalio.DigitalInOut(board.LED)
@@ -46,15 +48,15 @@ with open("/sd/indexfile.txt", "w") as writefile:
 with open("/sd/indexfile.txt", "r") as inputfile:
     for line in inputfile:
         i= line
-        #print(i)
+        #print(i) 
     inputfile.close
     index = int(line.strip()) + 1  # Increment index to start a new file
     #print("\nindex =",index)
     file_name = "/sd/history"+str(index)+".txt"  # file_name needs to be global to be used in the server route
 
-print("\nfilename:", file_name)
+print("\nfilename:", file_name,"\n")
 
- # start a new index file from 0
+ # start a new index file from 0 
  #comment this out to start a new index file saving the data from previous runs
 with open("/sd/indexfile.txt", "w") as writefile:       
     print(str(index), file=writefile)
@@ -64,7 +66,7 @@ with open("/sd/indexfile.txt", "w") as writefile:
 # Open the new history file in append mode ('a')
 # We write the header first
 with open(file_name, "w") as f:
-    f.write(f"Time(s), Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
+    f.write(f"Time, Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
 
 print("Logging started. Press Ctrl+C to stop.\n")
 
@@ -85,6 +87,23 @@ server = Server(pool, "/sd", debug=True)
 server.socket_timeout = 0.1
 server.start(str(wifi.radio.ipv4_address),port=80)
 
+
+# Create the NTP object after WiFi is connected
+ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT (Pacific Daylight Time)
+# Set the Pico's internal Real Time Clock (RTC)
+rtc.RTC().datetime = ntp.datetime
+
+# Get the current time from the internal clock
+now = rtc.RTC().datetime
+    
+    # Format the timestamp: YYYY-MM-DD HH:MM:SS
+timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
+
+print(f"Current time: {timestamp}")
+with open(file_name, "w") as f:
+    f.write(f"{timestamp} \n")
+    f.write(f"Time(s), Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
+
 # This route makes the browser download the file when you visit /download
 @server.route("/download")
 def download_file(request: Request):
@@ -99,17 +118,19 @@ def base(request: Request):
 
 async def log_data():
     """Task to log data every {timeIncrement} seconds."""
-    total_time = 0
     while True:
         temp = bme280.temperature * 9 / 5 + 32  # Convert to Fahrenheit
         hum = bme280.relative_humidity
-        pres = bme280.pressure * 0.02953 # converted to inches
-        
+        pres = bme280.pressure * 0.02953 # converted to inches Hg
+
+        # Get the current time from the internal clock
+        now = rtc.RTC().datetime 
+        # Format the timestamp: YYYY-MM-DD HH:MM:SS 
+        timestamp = f" {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
         with open(file_name, "a") as f:
-            f.write(f"{total_time}, {temp:.2f}, {hum:.2f}, {pres:.2f}\n")
+           f.write(f"{timestamp}, {temp:.2f}, {hum:.2f}, {pres:.2f}\n")
         
-        print(f"Logged at {total_time}s, Temp: {temp:.2f}°F, Humidity: {hum:.2f}%, Pressure: {pres:.2f} inHg")
-        total_time += timeIncrement
+        print(f"Logged at {timestamp}s, Temp: {temp:.2f}°F, Humidity: {hum:.2f}%, Pressure: {pres:.2f} inHg")
         await asyncio.sleep(timeIncrement)
 
 async def run_server():
@@ -121,11 +142,11 @@ async def run_server():
             server.poll()
         except Exception as e:
             # This catches "Soft" errors like timeouts without stopping the script
-            # print(f"Server poll error: {e}") 
+            print(f"Server poll error: {e}") 
             pass
         
         # This is CRITICAL: it allows the logger task to run
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(timeIncrement)
 
 async def main():
     # Run both the logger and the server at the same time
