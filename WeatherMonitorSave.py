@@ -9,7 +9,7 @@ import adafruit_sdcard
 from adafruit_bme280 import basic as adafruit_bme280
 
 
-timeIncrement = 1  # Set the time increment in seconds
+timeIncrement = 10  # Set the time increment in seconds
 ledTime = .01       # time that the led is flashing each cycle
 
 led = digitalio.DigitalInOut(board.LED)

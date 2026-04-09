@@ -41,6 +41,7 @@ storage.mount(vfs, "/sd")
 
 #  uncomment this section to stop starting a new index file each run
 """
+# start a new index file from 0 
 with open("/sd/indexfile.txt", "w") as writefile:   
     print( 0, file=writefile)
     writefile.close()
@@ -56,17 +57,10 @@ with open("/sd/indexfile.txt", "r") as inputfile:
 
 print("\nfilename:", file_name,"\n")
 
- # start a new index file from 0 
  #comment this out to start a new index file saving the data from previous runs
 with open("/sd/indexfile.txt", "w") as writefile:       
     print(str(index), file=writefile)
     writefile.close()
-
-
-# Open the new history file in append mode ('a')
-# We write the header first
-with open(file_name, "w") as f:
-    f.write(f"Time, Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
 
 print("Logging started. Press Ctrl+C to stop.\n")
 
@@ -95,14 +89,17 @@ rtc.RTC().datetime = ntp.datetime
 
 # Get the current time from the internal clock
 now = rtc.RTC().datetime
-    
+
+# Open the new history file 
+# We write the header first
+
     # Format the timestamp: YYYY-MM-DD HH:MM:SS
 timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
 
 print(f"Current time: {timestamp}")
 with open(file_name, "w") as f:
     f.write(f"{timestamp} \n")
-    f.write(f"Time(s), Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
+    f.write(f"Time, Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
 
 # This route makes the browser download the file when you visit /download
 @server.route("/download")
