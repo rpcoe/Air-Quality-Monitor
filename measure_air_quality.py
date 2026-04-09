@@ -1,3 +1,13 @@
+#  TODO List:
+#  - Add error handling for SD card and sensor issues
+#  _ Add a timestamp to the filename for better organization
+#  - Add a simple web interface to view the data without downloading
+#  - Start a new history file each day at midnight
+#  - Add a graphing library to visualize the data on the web interface
+#  - Add a method to download data in CSV format for easier analysis in Excel or Google Sheets
+#  - Add a method to upload data to a cloud service like Google Drive or AWS S3 for remote access and backup
+#  - Add a method to send alerts (e.g. email or SMS) if certain thresholds are exceeded (e.g. high temperature or low pressure)
+#  _ Change file name to include index and timestamp for better organization
 from time import sleep
 import os
 import ipaddress
@@ -36,7 +46,6 @@ cs = digitalio.DigitalInOut(board.GP17)  # CS pin for SD card
 sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
 storage.mount(vfs, "/sd")
-
 
 
 #  uncomment this section to stop starting a new index file each run
@@ -83,9 +92,14 @@ server.start(str(wifi.radio.ipv4_address),port=80)
 
 
 # Create the NTP object after WiFi is connected
-ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT (Pacific Daylight Time)
-# Set the Pico's internal Real Time Clock (RTC)
-rtc.RTC().datetime = ntp.datetime
+try:
+    print("Syncing time with internet...")
+    ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+    rtc.RTC().datetime = ntp.datetime  #
+    print("Clock synchronized!")
+except Exception as e:
+    print(f"Could not sync time: {e}")
+    print("Logging will proceed with default system time.")
 
 # Get the current time from the internal clock
 now = rtc.RTC().datetime
