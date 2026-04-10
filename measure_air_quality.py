@@ -1,13 +1,11 @@
 #  TODO List:
 #  - Add error handling for SD card and sensor issues
-#  _ Add a timestamp to the filename for better organization
 #  - Add a simple web interface to view the data without downloading
 #  - Start a new history file each day at midnight
 #  - Add a graphing library to visualize the data on the web interface
 #  - Add a method to download data in CSV format for easier analysis in Excel or Google Sheets
 #  - Add a method to upload data to a cloud service like Google Drive or AWS S3 for remote access and backup
 #  - Add a method to send alerts (e.g. email or SMS) if certain thresholds are exceeded (e.g. high temperature or low pressure)
-#  _ Change file name to include index and timestamp for better organization
 
 from time import sleep
 import os
@@ -29,7 +27,7 @@ from adafruit_httpserver import Server, Request, Response, POST
 
 
 timeIncrement = 5  # Set the time increment in seconds
-ledTime = .01       # time that the led is flashing each cycle
+#ledTime = .01       # time that the led is flashing each cycle
 
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
@@ -47,9 +45,6 @@ cs = digitalio.DigitalInOut(board.GP17)  # CS pin for SD card
 sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
 storage.mount(vfs, "/sd")
-
-
-
 
 
 # Connect to WiFi
@@ -83,13 +78,18 @@ except Exception as e:
 # Get the current time from the internal clock
 now = rtc.RTC().datetime
 
-# Open the new history file 
+# Open the new history file
 
 # Format the date as YYYY-MM-DD (e.g., 2026-04-09)
 date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
-date_string = "2026-04-08"  # Hardcoded for testing
+#current_day = 0  # Initialize to 0 so that it will trigger the creation of a new file on the first run
+current_day = now.tm_mday  # Set to current day to start logging to the correct file
+#date_string = "2026-04-08"  # Hardcoded for testing
+#current_day = 8  # Hardcoded for testing
 
-# Build the filename
+print(f"Current date: {date_string}")
+print(f"Current day: {current_day}")
+# Build the filename 
 file_name = f"/sd/log_{date_string}.txt"
 
 print(f"Current filename: {file_name}")
@@ -129,16 +129,30 @@ def download_file(request: Request):
 def base(request: Request):
     return Response(request, f"<html><body><h1>Pico W Data Logger</h1><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
 
-async def log_data():
+async def log_data(current_day):
     """Task to log data every {timeIncrement} seconds."""
     #add error handling for SD card and sensor issues
     while True:
+        now = rtc.RTC().datetime
+
+        # Check if the day has changed to start a new file
+        if current_day != now.tm_mday:          # Update the date string and filename for the new day
+            date_string = f"{now.tm_year}-{now.tm_mon:02d}-{current_day:02d}"
+            file_name = f"/sd/log_{date_string}.txt"
+            print(f"New day detected. Logging to new file: {file_name}")
+            current_day= now.tm_mday
+            # Write header to the new file
+            with open(file_name, "w") as f:
+                f.write("Time, Temp(C), Humidity(%), Pressure(inHg)\n")
+
+        date_string = f"{now.tm_year}-{now.tm_mon:02d}-{current_day:02d}"
+        file_name = f"/sd/log_{date_string}.txt"
+        
         temp = bme280.temperature * 9 / 5 + 32  # Convert to Fahrenheit
         hum = bme280.relative_humidity
         pres = bme280.pressure * 0.02953 # converted to inches Hg
 
-        # Get the current time from the internal clock
-        now = rtc.RTC().datetime 
+        
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
         timestamp = f" {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
         with open(file_name, "a") as f:
@@ -164,7 +178,7 @@ async def run_server():
 
 async def main():
     # Run both the logger and the server at the same time
-    await asyncio.gather(log_data(), run_server())
+    await asyncio.gather(log_data(current_day), run_server())
 
 asyncio.run(main())
 """
