@@ -1,5 +1,4 @@
 #  TODO List:
-#  - Add error handling for SD card and sensor issues
 #  - Add a simple web interface to view the data without downloading
 #  - Start a new history file each day at midnight
 #  - Add a graphing library to visualize the data on the web interface
@@ -20,6 +19,8 @@ import board
 import storage
 import adafruit_sdcard
 import adafruit_ntp
+import adafruit_ahtx0
+import adafruit_ens160
 import rtc
 
 from adafruit_bme280 import basic as adafruit_bme280
@@ -82,7 +83,6 @@ now = rtc.RTC().datetime
  
 # Format the date as YYYY-MM-DD (e.g., 2026-04-09)
 date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
-#current_day = 0  # Initialize to 0 so that it will trigger the creation of a new file on the first run
 current_day = now.tm_mday  # Set to current day to start logging to the correct file
 #date_string = "2026-04-08"  # Hardcoded for testing
 #current_day = 8  # Hardcoded for testing
@@ -127,7 +127,7 @@ def download_file(request: Request):
 # This route shows a simple link in your browser
 @server.route("/")
 def base(request: Request):
-    temp, hum, pres = read_data()
+    temp, hum, pres = read_data_bme280()
     return Response(request, f"<html><body><h1>AIR QUALITY LOGGER</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
 
 async def log_data(current_day):
@@ -150,13 +150,15 @@ async def log_data(current_day):
         date_string = f"{now.tm_year}-{now.tm_mon:02d}-{current_day:02d}"
         file_name = f"/sd/log_{date_string}.txt"
         
-        temp, hum, pres = read_data()        
+        temp, hum, pres = read_data_bme280()        
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
         timestamp = f" {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
-        with open(file_name, "a") as f:
-           f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}\n")
-        
-        print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg")
+        try:
+            with open(file_name, "a") as f:
+                f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}\n")
+            print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg")
+        except OSError as e:
+            print(f"Error writing to SD card: {e}")
         await asyncio.sleep(timeIncrement)
 
 async def run_server():
@@ -178,38 +180,23 @@ async def main():
     # Run both the logger and the server at the same time
     await asyncio.gather(log_data(current_day), run_server())
 
-def read_data():
-    temp = bme280.temperature * 9 / 5 + 32  # Convert to Fahrenheit
-    hum = bme280.relative_humidity
-    pres = bme280.pressure * 0.02953 # converted to inches Hg
+def read_data_bme280():
+    try:
+        temp = bme280.temperature * 9 / 5 + 32  # Convert to Fahrenheit
+        hum = bme280.relative_humidity
+        pres = bme280.pressure * 0.02953 # converted to inches Hg
+    except Exception as e:
+        print(f"Error reading BME280 sensor: {e}")
+        temp = 0
+        hum = 0
+        pres = 0
     return temp, hum, pres
 
 asyncio.run(main())
 """
-total_time = 0
 while True:
-    try:
         # Flash LED to show activity
         led.value = True
         sleep(ledTime)
         led.value = False
-
-        # Gather data from BME280 
-        temp = bme280.temperature* 9 / 5 + 32
-        humidity = bme280.relative_humidity
-        pressure = bme280.pressure * 0.02953  # Convert hPa to inHg
-
-        # Append data to the SD card file
-        with open(file_name, "a") as f:
-            data_string = f"{total_time}, {temp:.2f}, {humidity:.2f}, {pressure:.2f}\n"
-            f.write(data_string)
-            print("Time, Temp(°F), Humidity(%), Pressure(inHg):", data_string.strip())
-
-        # Wait for the next increment
-        sleep(timeIncrement - ledTime)
-        total_time += timeIncrement
-
-    except OSError as e:
-        print("SD card error or sensor unplugged:", e)
-        break
 """
