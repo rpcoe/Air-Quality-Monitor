@@ -25,7 +25,7 @@ import rtc
 
 from adafruit_bme280 import basic as adafruit_bme280
 from adafruit_httpserver import Server, Request, Response, POST
-
+from adafruit_httpserver import ChunkedResponse
 
 timeIncrement = 15  # Set the time increment in seconds
 ledTime = .01       # time that the led is flashing each cycle
@@ -117,18 +117,33 @@ with open(file_name, "a") as f:
     f.write(f"RESTART:  {timestamp}  \n")
 #    f.write(f"Time, Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
 
-# This route makes the browser download the file when you visit /download
-@server.route("/download")
-def download_file(request: Request):
-    with open(file_name, "r") as f:
-        print(f.read)  # Debugging line to check if file is being read correctly
-        return Response(request, f.read(), content_type="text/plain")
  
 # This route shows a simple link in your browser
 @server.route("/")
 def base(request: Request):
     temp, hum, pres = read_data_bme280()
     return Response(request, f"<html><body><h1>AIR QUALITY LOGGER</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
+
+from adafruit_httpserver import ChunkedResponse
+
+# This route makes the browser download the file when you visit /download
+# We use a generator to read the file in chunks so we don't run out of limited RAM on the Pico
+# Note: this is a very basic implementation and does not include error handling for file not found or other issues. It also assumes the file is small enough to be read in chunks of 512 bytes without causing issues. 
+@server.route("/download")
+def download_file(request: Request):
+    print(f"Downloading: {file_name}")
+    
+    def file_chunk_generator():
+        # Open in 'rb' (read binary) for more reliable network transfer
+        with open(file_name, "rb") as f:
+            while True:
+                chunk = f.read(512) 
+                if not chunk:
+                    break
+                yield chunk
+
+    # This sends the file in pieces so the Pico RAM stays happy
+    return ChunkedResponse(request, file_chunk_generator, content_type="text/plain")
 
 async def log_data(current_day):
     """Task to log data every {timeIncrement} seconds."""
