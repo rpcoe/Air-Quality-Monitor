@@ -26,7 +26,7 @@ from adafruit_bme280 import basic as adafruit_bme280
 from adafruit_httpserver import Server, Request, Response, POST
 
 
-timeIncrement = 5  # Set the time increment in seconds
+timeIncrement = 15  # Set the time increment in seconds
 #ledTime = .01       # time that the led is flashing each cycle
 
 led = digitalio.DigitalInOut(board.LED)
@@ -101,7 +101,7 @@ try:
 except OSError:
     print("New file created, writing header.")
     with open(file_name, "w") as f:
-        f.write("Time, Temp(C), Humidity(%), Pressure(inHg)\n")
+        f.write("Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
 
 
 
@@ -114,7 +114,7 @@ timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}
 
 print(f"Current time: {timestamp}")
 with open(file_name, "a") as f:
-    f.write(f"{timestamp} Restart \n")
+    f.write(f"RESTART:  {timestamp}  \n")
 #    f.write(f"Time, Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
 
 # This route makes the browser download the file when you visit /download
@@ -127,7 +127,8 @@ def download_file(request: Request):
 # This route shows a simple link in your browser
 @server.route("/")
 def base(request: Request):
-    return Response(request, f"<html><body><h1>Pico W Data Logger</h1><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
+    temp, hum, pres = read_data()
+    return Response(request, f"<html><body><h1>AIR QUALITY LOGGER</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
 
 async def log_data(current_day):
     """Task to log data every {timeIncrement} seconds."""
@@ -144,22 +145,18 @@ async def log_data(current_day):
             current_day= now.tm_mday
             # Write header to the new file
             with open(file_name, "w") as f:
-                f.write("Time, Temp(C), Humidity(%), Pressure(inHg)\n")
+                f.write("Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
 
         date_string = f"{now.tm_year}-{now.tm_mon:02d}-{current_day:02d}"
         file_name = f"/sd/log_{date_string}.txt"
         
-        temp = bme280.temperature * 9 / 5 + 32  # Convert to Fahrenheit
-        hum = bme280.relative_humidity
-        pres = bme280.pressure * 0.02953 # converted to inches Hg
-
-        
+        temp, hum, pres = read_data()        
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
         timestamp = f" {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
         with open(file_name, "a") as f:
-           f.write(f"{timestamp}, {temp:.2f}, {hum:.2f}, {pres:.2f}\n")
+           f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}\n")
         
-        print(f"Logged at {timestamp}s, Temp: {temp:.2f}°F, Humidity: {hum:.2f}%, Pressure: {pres:.2f} inHg")
+        print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg")
         await asyncio.sleep(timeIncrement)
 
 async def run_server():
@@ -180,6 +177,12 @@ async def run_server():
 async def main():
     # Run both the logger and the server at the same time
     await asyncio.gather(log_data(current_day), run_server())
+
+def read_data():
+    temp = bme280.temperature * 9 / 5 + 32  # Convert to Fahrenheit
+    hum = bme280.relative_humidity
+    pres = bme280.pressure * 0.02953 # converted to inches Hg
+    return temp, hum, pres
 
 asyncio.run(main())
 """
