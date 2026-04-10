@@ -8,6 +8,7 @@
 #  - Add a method to upload data to a cloud service like Google Drive or AWS S3 for remote access and backup
 #  - Add a method to send alerts (e.g. email or SMS) if certain thresholds are exceeded (e.g. high temperature or low pressure)
 #  _ Change file name to include index and timestamp for better organization
+
 from time import sleep
 import os
 import ipaddress
@@ -27,7 +28,7 @@ from adafruit_bme280 import basic as adafruit_bme280
 from adafruit_httpserver import Server, Request, Response, POST
 
 
-timeIncrement = 1  # Set the time increment in seconds
+timeIncrement = 5  # Set the time increment in seconds
 ledTime = .01       # time that the led is flashing each cycle
 
 led = digitalio.DigitalInOut(board.LED)
@@ -48,30 +49,8 @@ vfs = storage.VfsFat(sdcard)
 storage.mount(vfs, "/sd")
 
 
-#  uncomment this section to stop starting a new index file each run
-"""
-# start a new index file from 0 
-with open("/sd/indexfile.txt", "w") as writefile:   
-    print( 0, file=writefile)
-    writefile.close()
-"""
-with open("/sd/indexfile.txt", "r") as inputfile:
-    for line in inputfile:
-        i= line
-        #print(i) 
-    inputfile.close
-    index = int(line.strip()) + 1  # Increment index to start a new file
-    #print("\nindex =",index)
-    file_name = "/sd/history"+str(index)+".txt"  # file_name needs to be global to be used in the server route
 
-print("\nfilename:", file_name,"\n")
 
- #comment this out to start a new index file saving the data from previous runs
-with open("/sd/indexfile.txt", "w") as writefile:       
-    print(str(index), file=writefile)
-    writefile.close()
-
-print("Logging started. Press Ctrl+C to stop.\n")
 
 # Connect to WiFi
 #  set static IP address
@@ -105,21 +84,44 @@ except Exception as e:
 now = rtc.RTC().datetime
 
 # Open the new history file 
+
+# Format the date as YYYY-MM-DD (e.g., 2026-04-09)
+date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
+date_string = "2026-04-08"  # Hardcoded for testing
+
+# Build the filename
+file_name = f"/sd/log_{date_string}.txt"
+
+print(f"Current filename: {file_name}")
+
+# Check if the file already exists to decide whether to write a header
+try:
+    os.stat(file_name)
+    print("File exists, appending data.")
+except OSError:
+    print("New file created, writing header.")
+    with open(file_name, "w") as f:
+        f.write("Time, Temp(C), Humidity(%), Pressure(inHg)\n")
+
+
+
+print("Logging started. Press Ctrl+C to stop.\n")
+
 # We write the header first
 
     # Format the timestamp: YYYY-MM-DD HH:MM:SS
 timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
 
 print(f"Current time: {timestamp}")
-with open(file_name, "w") as f:
-    f.write(f"{timestamp} \n")
-    f.write(f"Time, Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
+with open(file_name, "a") as f:
+    f.write(f"{timestamp} Restart \n")
+#    f.write(f"Time, Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
 
 # This route makes the browser download the file when you visit /download
 @server.route("/download")
 def download_file(request: Request):
-    # Change 'history1.txt' to your actual file_name variable logic
     with open(file_name, "r") as f:
+        print(f.read)  # Debugging line to check if file is being read correctly
         return Response(request, f.read(), content_type="text/plain")
 
 # This route shows a simple link in your browser
@@ -129,6 +131,7 @@ def base(request: Request):
 
 async def log_data():
     """Task to log data every {timeIncrement} seconds."""
+    #add error handling for SD card and sensor issues
     while True:
         temp = bme280.temperature * 9 / 5 + 32  # Convert to Fahrenheit
         hum = bme280.relative_humidity
@@ -157,7 +160,7 @@ async def run_server():
             pass
         
         # This is CRITICAL: it allows the logger task to run
-        await asyncio.sleep(timeIncrement)
+        await asyncio.sleep(1)
 
 async def main():
     # Run both the logger and the server at the same time
