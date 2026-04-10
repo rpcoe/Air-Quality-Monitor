@@ -1,13 +1,12 @@
 #  TODO List:
 #  - Add error handling for SD card and sensor issues
-#  _ Add a timestamp to the filename for better organization
 #  - Add a simple web interface to view the data without downloading
 #  - Start a new history file each day at midnight
 #  - Add a graphing library to visualize the data on the web interface
 #  - Add a method to download data in CSV format for easier analysis in Excel or Google Sheets
 #  - Add a method to upload data to a cloud service like Google Drive or AWS S3 for remote access and backup
 #  - Add a method to send alerts (e.g. email or SMS) if certain thresholds are exceeded (e.g. high temperature or low pressure)
-#  _ Change file name to include index and timestamp for better organization
+
 from time import sleep
 import os
 import ipaddress
@@ -27,8 +26,8 @@ from adafruit_bme280 import basic as adafruit_bme280
 from adafruit_httpserver import Server, Request, Response, POST
 
 
-timeIncrement = 1  # Set the time increment in seconds
-ledTime = .01       # time that the led is flashing each cycle
+timeIncrement = 15  # Set the time increment in seconds
+#ledTime = .01       # time that the led is flashing each cycle
 
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
@@ -47,31 +46,6 @@ sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
 storage.mount(vfs, "/sd")
 
-
-#  uncomment this section to stop starting a new index file each run
-"""
-# start a new index file from 0 
-with open("/sd/indexfile.txt", "w") as writefile:   
-    print( 0, file=writefile)
-    writefile.close()
-"""
-with open("/sd/indexfile.txt", "r") as inputfile:
-    for line in inputfile:
-        i= line
-        #print(i) 
-    inputfile.close
-    index = int(line.strip()) + 1  # Increment index to start a new file
-    #print("\nindex =",index)
-    file_name = "/sd/history"+str(index)+".txt"  # file_name needs to be global to be used in the server route
-
-print("\nfilename:", file_name,"\n")
-
- #comment this out to start a new index file saving the data from previous runs
-with open("/sd/indexfile.txt", "w") as writefile:       
-    print(str(index), file=writefile)
-    writefile.close()
-
-print("Logging started. Press Ctrl+C to stop.\n")
 
 # Connect to WiFi
 #  set static IP address
@@ -104,44 +78,85 @@ except Exception as e:
 # Get the current time from the internal clock
 now = rtc.RTC().datetime
 
-# Open the new history file 
+# Open the new history file
+ 
+# Format the date as YYYY-MM-DD (e.g., 2026-04-09)
+date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
+#current_day = 0  # Initialize to 0 so that it will trigger the creation of a new file on the first run
+current_day = now.tm_mday  # Set to current day to start logging to the correct file
+#date_string = "2026-04-08"  # Hardcoded for testing
+#current_day = 8  # Hardcoded for testing
+
+print(f"Current date: {date_string}")
+print(f"Current day: {current_day}")
+# Build the filename 
+file_name = f"/sd/log_{date_string}.txt"
+
+print(f"Current filename: {file_name}")
+
+# Check if the file already exists to decide whether to write a header
+try:
+    os.stat(file_name)
+    print("File exists, appending data.")
+except OSError:
+    print("New file created, writing header.")
+    with open(file_name, "w") as f:
+        f.write("Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
+
+
+
+print("Logging started. Press Ctrl+C to stop.\n")
+
 # We write the header first
 
     # Format the timestamp: YYYY-MM-DD HH:MM:SS
 timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
 
 print(f"Current time: {timestamp}")
-with open(file_name, "w") as f:
-    f.write(f"{timestamp} \n")
-    f.write(f"Time, Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
+with open(file_name, "a") as f:
+    f.write(f"RESTART:  {timestamp}  \n")
+#    f.write(f"Time, Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
 
 # This route makes the browser download the file when you visit /download
 @server.route("/download")
 def download_file(request: Request):
-    # Change 'history1.txt' to your actual file_name variable logic
     with open(file_name, "r") as f:
+        print(f.read)  # Debugging line to check if file is being read correctly
         return Response(request, f.read(), content_type="text/plain")
-
+ 
 # This route shows a simple link in your browser
 @server.route("/")
 def base(request: Request):
-    return Response(request, f"<html><body><h1>Pico W Data Logger</h1><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
+    temp, hum, pres = read_data()
+    return Response(request, f"<html><body><h1>AIR QUALITY LOGGER</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
 
-async def log_data():
+async def log_data(current_day):
     """Task to log data every {timeIncrement} seconds."""
+    #add error handling for SD card and sensor issues
     while True:
-        temp = bme280.temperature * 9 / 5 + 32  # Convert to Fahrenheit
-        hum = bme280.relative_humidity
-        pres = bme280.pressure * 0.02953 # converted to inches Hg
+        now = rtc.RTC().datetime
 
-        # Get the current time from the internal clock
-        now = rtc.RTC().datetime 
+        # Check if the day has changed to start a new file
+        if current_day != now.tm_mday:          # Update the date string and filename for the new day
+
+            date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
+            file_name = f"/sd/log_{date_string}.txt"
+            print(f"New day detected. Logging to new file: {file_name}")
+            current_day= now.tm_mday
+            # Write header to the new file
+            with open(file_name, "w") as f:
+                f.write("Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
+
+        date_string = f"{now.tm_year}-{now.tm_mon:02d}-{current_day:02d}"
+        file_name = f"/sd/log_{date_string}.txt"
+        
+        temp, hum, pres = read_data()        
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
         timestamp = f" {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
         with open(file_name, "a") as f:
-           f.write(f"{timestamp}, {temp:.2f}, {hum:.2f}, {pres:.2f}\n")
+           f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}\n")
         
-        print(f"Logged at {timestamp}s, Temp: {temp:.2f}°F, Humidity: {hum:.2f}%, Pressure: {pres:.2f} inHg")
+        print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg")
         await asyncio.sleep(timeIncrement)
 
 async def run_server():
@@ -157,11 +172,17 @@ async def run_server():
             pass
         
         # This is CRITICAL: it allows the logger task to run
-        await asyncio.sleep(timeIncrement)
+        await asyncio.sleep(1)
 
 async def main():
     # Run both the logger and the server at the same time
-    await asyncio.gather(log_data(), run_server())
+    await asyncio.gather(log_data(current_day), run_server())
+
+def read_data():
+    temp = bme280.temperature * 9 / 5 + 32  # Convert to Fahrenheit
+    hum = bme280.relative_humidity
+    pres = bme280.pressure * 0.02953 # converted to inches Hg
+    return temp, hum, pres
 
 asyncio.run(main())
 """

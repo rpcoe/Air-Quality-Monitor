@@ -1,5 +1,4 @@
-###############  This program will read the index file and print the lastest data run
-
+###############  This program will read the log files and print the the selected data run
 
 import os
 import board
@@ -7,8 +6,8 @@ import busio as io
 import digitalio
 import storage
 import adafruit_sdcard
-#import microcontroller
 from time import sleep
+import rtc
 
 # Connect to the card and mount the filesystem.
 spi = io.SPI(board.GP18, board.GP19, board.GP16)    # SCK, MOSI, MISO
@@ -17,19 +16,15 @@ sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
 
 storage.mount(vfs, "/sd")
+now = rtc.RTC().datetime
+date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
+#date_string = "2026-04-07"  # Hardcoded for testing
 
-
-with open("/sd/indexfile.txt", "r") as inputfile:
-    for line in inputfile:
-        i= line
-        #print(i)
-    inputfile.close
-    index = int(line.strip())
-    print("\nLast File Index =",index)
+# Build the filename
+file_name = f"/sd/log_{date_string}.txt"
 
 while True:
-    file_name = "/sd/history"+str(index)+".txt"
-    print("\nfilename:", file_name)
+    print("\nfile_name:", file_name)
 
 
     with open(file_name, "r") as inputfile:      
@@ -37,9 +32,10 @@ while True:
             print(line)
         inputfile.close    
     #sleep(1)  # Need to input a new index # to read a different file
-    print("Enter a new file index to display:")
-    index = input() 
-    #print(f"Index changed to: {index}")
-    print("Index changed to: index =", index)
+    print("Enter a new file date to display: YYYY-MM-DD")
+    date_input = input()
+    file_name = f"/sd/log_{date_input}.txt"#print(f"Index changed to: {index}")
+    print("File changed to: ", file_name)
+    sleep(3)  # Sleep to allow time for the file to be read before the next input
 
 print("stopped")
