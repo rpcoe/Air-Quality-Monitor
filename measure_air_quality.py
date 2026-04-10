@@ -28,7 +28,7 @@ from adafruit_httpserver import Server, Request, Response, POST
 
 
 timeIncrement = 15  # Set the time increment in seconds
-#ledTime = .01       # time that the led is flashing each cycle
+ledTime = .01       # time that the led is flashing each cycle
 
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
@@ -172,6 +172,11 @@ async def run_server():
             # This catches "Soft" errors like timeouts without stopping the script
             print(f"Server poll error: {e}") 
             pass
+
+        # Flash LED to show activity
+        led.value = True
+        sleep(ledTime)
+        led.value = False
         
         # This is CRITICAL: it allows the logger task to run
         await asyncio.sleep(1)
@@ -193,10 +198,3 @@ def read_data_bme280():
     return temp, hum, pres
 
 asyncio.run(main())
-"""
-while True:
-        # Flash LED to show activity
-        led.value = True
-        sleep(ledTime)
-        led.value = False
-"""
