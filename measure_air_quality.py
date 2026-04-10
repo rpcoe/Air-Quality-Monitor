@@ -79,7 +79,7 @@ except Exception as e:
 now = rtc.RTC().datetime
 
 # Open the new history file
-
+ 
 # Format the date as YYYY-MM-DD (e.g., 2026-04-09)
 date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
 #current_day = 0  # Initialize to 0 so that it will trigger the creation of a new file on the first run
@@ -123,7 +123,7 @@ def download_file(request: Request):
     with open(file_name, "r") as f:
         print(f.read)  # Debugging line to check if file is being read correctly
         return Response(request, f.read(), content_type="text/plain")
-
+ 
 # This route shows a simple link in your browser
 @server.route("/")
 def base(request: Request):
@@ -137,7 +137,8 @@ async def log_data(current_day):
 
         # Check if the day has changed to start a new file
         if current_day != now.tm_mday:          # Update the date string and filename for the new day
-            date_string = f"{now.tm_year}-{now.tm_mon:02d}-{current_day:02d}"
+
+            date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
             file_name = f"/sd/log_{date_string}.txt"
             print(f"New day detected. Logging to new file: {file_name}")
             current_day= now.tm_mday
