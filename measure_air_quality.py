@@ -27,7 +27,12 @@ from adafruit_bme280 import basic as adafruit_bme280
 from adafruit_httpserver import Server, Request, Response, POST
 from adafruit_httpserver import ChunkedResponse
 
-timeIncrement = 15  # Set the time increment in seconds
+def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
+    print("New file created, writing header.")
+    with open(file_name, "w") as f:
+        f.write("Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
+
+timeIncrement = 30  # Set the time increment in seconds for logging data. Adjust as needed, but remember that very short intervals may fill up the SD card quickly and may not be necessary for air quality monitoring.
 ledTime = .01       # time that the led is flashing each cycle
 
 led = digitalio.DigitalInOut(board.LED)
@@ -84,11 +89,9 @@ now = rtc.RTC().datetime
 # Format the date as YYYY-MM-DD (e.g., 2026-04-09)
 date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
 current_day = now.tm_mday  # Set to current day to start logging to the correct file
-#date_string = "2026-04-08"  # Hardcoded for testing
-#current_day = 8  # Hardcoded for testing
+#date_string = "2026-04-03"  # Hardcoded for testing
+#current_day = 2  # Hardcoded for testing
 
-print(f"Current date: {date_string}")
-print(f"Current day: {current_day}")
 # Build the filename 
 file_name = f"/sd/log_{date_string}.txt"
 
@@ -99,9 +102,8 @@ try:
     os.stat(file_name)
     print("File exists, appending data.")
 except OSError:
-    print("New file created, writing header.")
-    with open(file_name, "w") as f:
-        f.write("Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
+    startNewFile(file_name)  # This will create the file and write the header if it doesn't exist 
+    
 
 
 
@@ -117,14 +119,13 @@ with open(file_name, "a") as f:
     f.write(f"RESTART:  {timestamp}  \n")
 #    f.write(f"Time, Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
 
- 
-# This route shows a simple link in your browser
+
+# This routine shows a simple link in your browser
 @server.route("/")
 def base(request: Request):
     temp, hum, pres = read_data_bme280()
-    return Response(request, f"<html><body><h1>AIR QUALITY LOGGER</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
+    return Response(request, f"<html><body><h1>AIR QUALITY MONITOR</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
 
-from adafruit_httpserver import ChunkedResponse
 
 # This routine makes the browser download the file when you visit /download to downloads on your computer. It uses the 'Content-Disposition' header to force the download 
 # # We use a generator to read the file in chunks so we don't run out of limited RAM on the Pico
@@ -164,9 +165,9 @@ def download_file(request: Request):
         headers=headers
     )
 
-async def log_data(current_day):
+async def log_data():
     """Task to log data every {timeIncrement} seconds."""
-    #add error handling for SD card and sensor issues
+    global file_name, current_day
     while True:
         now = rtc.RTC().datetime
 
@@ -177,12 +178,13 @@ async def log_data(current_day):
             file_name = f"/sd/log_{date_string}.txt"
             print(f"New day detected. Logging to new file: {file_name}")
             current_day= now.tm_mday
+            startNewFile(file_name)
             # Write header to the new file
-            with open(file_name, "w") as f:
-                f.write("Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
+            #with open(file_name, "w") as f:
+            #    f.write("Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
 
-        date_string = f"{now.tm_year}-{now.tm_mon:02d}-{current_day:02d}"
-        file_name = f"/sd/log_{date_string}.txt"
+        #date_string = f"{now.tm_year}-{now.tm_mon:02d}-{current_day:02d}"
+        #file_name = f"/sd/log_{date_string}.txt"
         
         temp, hum, pres = read_data_bme280()        
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
@@ -194,7 +196,7 @@ async def log_data(current_day):
         except OSError as e:
             print(f"Error writing to SD card: {e}")
         await asyncio.sleep(timeIncrement)
-
+    
 async def run_server():
     """Task to handle browser requests."""
     #print("Server task started...")
@@ -217,7 +219,7 @@ async def run_server():
 
 async def main():
     # Run both the logger and the server at the same time
-    await asyncio.gather(log_data(current_day), run_server())
+    await asyncio.gather(log_data(), run_server())
 
 def read_data_bme280():
     try:
@@ -230,5 +232,7 @@ def read_data_bme280():
         hum = 0
         pres = 0
     return temp, hum, pres
+
+
 
 asyncio.run(main())
