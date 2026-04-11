@@ -126,24 +126,43 @@ def base(request: Request):
 
 from adafruit_httpserver import ChunkedResponse
 
-# This route makes the browser download the file when you visit /download
-# We use a generator to read the file in chunks so we don't run out of limited RAM on the Pico
+# This routine makes the browser download the file when you visit /download to downloads on your computer. It uses the 'Content-Disposition' header to force the download 
+# # We use a generator to read the file in chunks so we don't run out of limited RAM on the Pico
 # Note: this is a very basic implementation and does not include error handling for file not found or other issues. It also assumes the file is small enough to be read in chunks of 512 bytes without causing issues. 
+
 @server.route("/download")
 def download_file(request: Request):
-    print(f"Downloading: {file_name}")
     
+    # 1. Get the actual size of the file in bytes
+    file_stats = os.stat(file_name)
+    file_size = file_stats[6] # Index 6 is the size in bytes
+    
+    # 2. Prepare the filename for the PC
+    download_name = file_name.split("/")[-1].replace(".txt", ".csv")
+
     def file_chunk_generator():
-        # Open in 'rb' (read binary) for more reliable network transfer
         with open(file_name, "rb") as f:
             while True:
-                chunk = f.read(512) 
+                chunk = f.read(1024) # Increased to 1024 for speed
                 if not chunk:
                     break
                 yield chunk
 
-    # This sends the file in pieces so the Pico RAM stays happy
-    return ChunkedResponse(request, file_chunk_generator, content_type="text/plain")
+    # 3. Explicitly tell Chrome the file size and name
+    headers = {
+        "Content-Disposition": f'attachment; filename="{download_name}"',
+        "Content-Length": str(file_size),
+        "Connection": "close"
+    }
+
+    print(f"Sending {download_name} ({file_size} bytes)...")
+    
+    return ChunkedResponse(
+        request, 
+        file_chunk_generator, 
+        content_type="text/csv", 
+        headers=headers
+    )
 
 async def log_data(current_day):
     """Task to log data every {timeIncrement} seconds."""
