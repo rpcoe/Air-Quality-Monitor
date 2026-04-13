@@ -111,7 +111,7 @@ except OSError:
     
 # Create sensor object, using the board's default I2C bus.
 sensorType = os.getenv("SENSOR_TYPE", "NONE").upper()  # Default to NONE if not set
-if sensorType != None:
+if sensorType != "NONE":
     i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
 if sensorType == "BME280":
     # address can change based on bme device
