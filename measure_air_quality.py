@@ -101,6 +101,11 @@ print(f"Current filename: {file_name}")
 try:
     os.stat(file_name)
     print("File exists, appending data.")
+        # Format the timestamp: YYYY-MM-DD HH:MM:SS
+    timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
+
+    with open(file_name, "a") as f:
+        f.write(f"RESTART:  {timestamp}  \n")
 except OSError:
     startNewFile(file_name)  # This will create the file and write the header if it doesn't exist 
     
@@ -110,12 +115,10 @@ print("Logging started. Press Ctrl+C to stop.\n")
 # We write the header first
 
     # Format the timestamp: YYYY-MM-DD HH:MM:SS
-timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
+#timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
 
-print(f"Current time: {timestamp}")
-with open(file_name, "a") as f:
-    f.write(f"RESTART:  {timestamp}  \n")
-#    f.write(f"Time, Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
+#print(f"Current time: {timestamp}")
+
 
 
 # This routine shows a simple link in your browser
@@ -174,7 +177,7 @@ async def log_data():
             file_name = f"/sd/log_{date_string}.txt"
             print(f"New day detected. Logging to new file: {file_name}")
             current_day= now.tm_mday
-            startNewFile(file_name)
+            startNewFile(file_name) 
         
         temp, hum, pres = read_data_bme280()  
          
