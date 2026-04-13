@@ -1,6 +1,5 @@
 #  TODO List:
 #  - Add a simple web interface to view the data without downloading
-#  - Start a new history file each day at midnight
 #  - Add a graphing library to visualize the data on the web interface
 #  - Add a method to download data in CSV format for easier analysis in Excel or Google Sheets
 #  - Add a method to upload data to a cloud service like Google Drive or AWS S3 for remote access and backup
@@ -30,7 +29,7 @@ from adafruit_httpserver import ChunkedResponse
 def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
     print("New file created, writing header.")
     with open(file_name, "w") as f:
-        f.write("Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
+        f.write(" ,Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
 
 timeIncrement = 30  # Set the time increment in seconds for logging data. Adjust as needed, but remember that very short intervals may fill up the SD card quickly and may not be necessary for air quality monitoring.
 ledTime = .01       # time that the led is flashing each cycle
@@ -38,12 +37,7 @@ ledTime = .01       # time that the led is flashing each cycle
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 
-# Create sensor object, using the board's default I2C bus.
-i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
 
-# address can change based on bme device
-# if 0x76 does not work try 0x77 :)
-bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
 
 # Connect to the card and mount the filesystem.
 spi = busio.SPI(board.GP18, board.GP19, board.GP16)  # SCK, MOSI, MISO
@@ -54,10 +48,17 @@ storage.mount(vfs, "/sd")
 
 
 # Connect to WiFi
-#  set static IP address
-ipv4 = ipaddress.IPv4Address("192.168.254.230")
-netmask = ipaddress.IPv4Address("255.255.255.0")
-gateway = ipaddress.IPv4Address("192.168.254.254")
+#  set static IP address to avoid issues with changing IPs and to make it easier to access the web interface. Make sure the IP address you choose is outside the range of addresses your router assigns via DHCP to avoid conflicts. You can check your router's settings to see the DHCP range and choose an IP address that is not in that range. For example, if your router assigns addresses from
+# Retrieve strings from settings.toml
+gateway = os.getenv("MY_GATEWAY")
+netmask = os.getenv("MY_NETMASK")
+ipv4 = os.getenv("IP_ADDRESS")   #ipaddress.IPv4Address("os.getenv('IP_ADDRESS')")
+ipv4 = ipaddress.IPv4Address(ipv4)  # Convert the string to an IPv4Address object
+netmask = ipaddress.IPv4Address(netmask)  #netmask = ipaddress.IPv4Address("255.255.255.0")
+gateway = ipaddress.IPv4Address(gateway)    #("192.168.254.254")  #("192.168.254.254")
+#gateway = ipaddress.IPv4Address("192.168.254.254")
+print(f"Using IP address: {ipv4}  gateway: {gateway}  netmask: {netmask}")
+
 wifi.radio.set_ipv4_address(ipv4=ipv4, netmask=netmask, gateway=gateway)
 #  connect to your SSID
 wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
@@ -101,9 +102,19 @@ print(f"Current filename: {file_name}")
 try:
     os.stat(file_name)
     print("File exists, appending data.")
+        # Format the timestamp: YYYY-MM-DD HH:MM:SS
+    timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
+
+    with open(file_name, "a") as f:
+        f.write(f"RESTART:  {timestamp}  \n")
 except OSError:
     startNewFile(file_name)  # This will create the file and write the header if it doesn't exist 
     
+# Create sensor object, using the board's default I2C bus.
+i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
+# address can change based on bme device
+# if 0x76 does not work try 0x77 :)
+bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
 
 
 
@@ -112,12 +123,9 @@ print("Logging started. Press Ctrl+C to stop.\n")
 # We write the header first
 
     # Format the timestamp: YYYY-MM-DD HH:MM:SS
-timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
+#timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
 
-print(f"Current time: {timestamp}")
-with open(file_name, "a") as f:
-    f.write(f"RESTART:  {timestamp}  \n")
-#    f.write(f"Time, Temp(°F), Humidity(%), Pressure(inHg):  Index = {index}  \n")
+#print(f"Current time: {timestamp}")
 
 
 # This routine shows a simple link in your browser
@@ -132,38 +140,36 @@ def base(request: Request):
 # Note: this is a very basic implementation and does not include error handling for file not found or other issues. It also assumes the file is small enough to be read in chunks of 512 bytes without causing issues. 
 
 @server.route("/download")
+@server.route("/download")
 def download_file(request: Request):
+    global file_name # Ensure we are using the most recent filename
     
-    # 1. Get the actual size of the file in bytes
-    file_stats = os.stat(file_name)
-    file_size = file_stats[6] # Index 6 is the size in bytes
+    # 1. Capture the exact name and size AT THIS MOMENT
+    target_file = file_name 
+    file_size = os.stat(target_file)[6]
     
-    # 2. Prepare the filename for the PC
-    download_name = file_name.split("/")[-1].replace(".txt", ".csv")
+    download_name = target_file.split("/")[-1].replace(".txt", ".csv")
 
     def file_chunk_generator():
-        with open(file_name, "rb") as f:
-            while True:
-                chunk = f.read(1024) # Increased to 1024 for speed
+        # Use the 'target_file' variable we locked above
+        with open(target_file, "rb") as f:
+            bytes_sent = 0
+            while bytes_sent < file_size:
+                # Read 1024 or whatever is left to reach file_size
+                chunk = f.read(min(1024, file_size - bytes_sent))
                 if not chunk:
                     break
                 yield chunk
+                bytes_sent += len(chunk)
 
-    # 3. Explicitly tell Chrome the file size and name
     headers = {
         "Content-Disposition": f'attachment; filename="{download_name}"',
         "Content-Length": str(file_size),
         "Connection": "close"
     }
 
-    print(f"Sending {download_name} ({file_size} bytes)...")
-    
-    return ChunkedResponse(
-        request, 
-        file_chunk_generator, 
-        content_type="text/csv", 
-        headers=headers
-    )
+    print(f"Finalizing download: {download_name} ({file_size} bytes)")
+    return ChunkedResponse(request, file_chunk_generator, content_type="text/csv", headers=headers)
 
 async def log_data():
     """Task to log data every {timeIncrement} seconds."""
@@ -178,15 +184,10 @@ async def log_data():
             file_name = f"/sd/log_{date_string}.txt"
             print(f"New day detected. Logging to new file: {file_name}")
             current_day= now.tm_mday
-            startNewFile(file_name)
-            # Write header to the new file
-            #with open(file_name, "w") as f:
-            #    f.write("Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
-
-        #date_string = f"{now.tm_year}-{now.tm_mon:02d}-{current_day:02d}"
-        #file_name = f"/sd/log_{date_string}.txt"
+            startNewFile(file_name) 
         
-        temp, hum, pres = read_data_bme280()        
+        temp, hum, pres = read_data_bme280()  
+         
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
         timestamp = f" {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
         try:
