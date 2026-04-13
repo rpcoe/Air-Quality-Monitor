@@ -1,6 +1,5 @@
 #  TODO List:
 #  - Add a simple web interface to view the data without downloading
-#  - Start a new history file each day at midnight
 #  - Add a graphing library to visualize the data on the web interface
 #  - Add a method to download data in CSV format for easier analysis in Excel or Google Sheets
 #  - Add a method to upload data to a cloud service like Google Drive or AWS S3 for remote access and backup
