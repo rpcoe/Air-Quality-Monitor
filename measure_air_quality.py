@@ -38,12 +38,7 @@ ledTime = .01       # time that the led is flashing each cycle
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 
-# Create sensor object, using the board's default I2C bus.
-i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
 
-# address can change based on bme device
-# if 0x76 does not work try 0x77 :)
-bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
 
 # Connect to the card and mount the filesystem.
 spi = busio.SPI(board.GP18, board.GP19, board.GP16)  # SCK, MOSI, MISO
@@ -54,10 +49,17 @@ storage.mount(vfs, "/sd")
 
 
 # Connect to WiFi
-#  set static IP address
-ipv4 = ipaddress.IPv4Address("192.168.254.230")
-netmask = ipaddress.IPv4Address("255.255.255.0")
-gateway = ipaddress.IPv4Address("192.168.254.254")
+#  set static IP address to avoid issues with changing IPs and to make it easier to access the web interface. Make sure the IP address you choose is outside the range of addresses your router assigns via DHCP to avoid conflicts. You can check your router's settings to see the DHCP range and choose an IP address that is not in that range. For example, if your router assigns addresses from
+# Retrieve strings from settings.toml
+gateway = os.getenv("MY_GATEWAY")
+netmask = os.getenv("MY_NETMASK")
+ipv4 = os.getenv("IP_ADDRESS")   #ipaddress.IPv4Address("os.getenv('IP_ADDRESS')")
+ipv4 = ipaddress.IPv4Address(ipv4)  # Convert the string to an IPv4Address object
+netmask = ipaddress.IPv4Address(netmask)  #netmask = ipaddress.IPv4Address("255.255.255.0")
+gateway = ipaddress.IPv4Address(gateway)    #("192.168.254.254")  #("192.168.254.254")
+#gateway = ipaddress.IPv4Address("192.168.254.254")
+print(f"Using IP address: {ipv4}  gateway: {gateway}  netmask: {netmask}")
+
 wifi.radio.set_ipv4_address(ipv4=ipv4, netmask=netmask, gateway=gateway)
 #  connect to your SSID
 wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
@@ -109,6 +111,13 @@ try:
 except OSError:
     startNewFile(file_name)  # This will create the file and write the header if it doesn't exist 
     
+# Create sensor object, using the board's default I2C bus.
+i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
+# address can change based on bme device
+# if 0x76 does not work try 0x77 :)
+bme280 = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
+
+
 
 print("Logging started. Press Ctrl+C to stop.\n")
 
@@ -118,7 +127,6 @@ print("Logging started. Press Ctrl+C to stop.\n")
 #timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
 
 #print(f"Current time: {timestamp}")
-
 
 
 # This routine shows a simple link in your browser
