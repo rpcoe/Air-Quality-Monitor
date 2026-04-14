@@ -46,7 +46,7 @@ sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
 storage.mount(vfs, "/sd")
 
-
+#  to use DHCP instead of static IP, comment out the wifi.radio.set_ipv4_address() line below and uncomment the line below to connect to WiFi using DHCP. Note that using DHCP may cause issues if your router changes the assigned IP address, which can make it difficult to access the web interface. If you choose to use DHCP, you may want to set up a DHCP reservation in your router for the Pico's MAC address to ensure it always gets the same IP address.
 # Connect to WiFi
 #  set static IP address to avoid issues with changing IPs and to make it easier to access the web interface. Make sure the IP address you choose is outside the range of addresses your router assigns via DHCP to avoid conflicts. You can check your router's settings to see the DHCP range and choose an IP address that is not in that range. For example, if your router assigns addresses from
 # Retrieve strings from settings.toml
@@ -59,6 +59,9 @@ gateway = ipaddress.IPv4Address(gateway)    #("192.168.254.254")  #("192.168.254
 print(f"Using IP address: {ipv4}  gateway: {gateway}  netmask: {netmask}")
 
 wifi.radio.set_ipv4_address(ipv4=ipv4, netmask=netmask, gateway=gateway)
+
+
+
 #  connect to your SSID
 wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
 
@@ -110,6 +113,7 @@ except OSError:
     startNewFile(file_name)  # This will create the file and write the header if it doesn't exist 
     
 # Create sensor object, using the board's default I2C bus.
+global sensorType
 sensorType = os.getenv("SENSOR_TYPE", "NONE").upper()  # Default to NONE if not set
 if sensorType != "NONE":
     i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
@@ -118,7 +122,10 @@ if sensorType == "BME280":
     # if 0x76 does not work try 0x77 :)
     sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
 if sensorType == "ENS160+AHT21":        # ENS160 for air quality and AHT21 for temp and humidity
-    sensor = adafruit_ahtx0.AHTx0(i2c)  # This needs be tested!!!
+    temp_humid_sensor = adafruit_ahtx0.AHTx0(i2c, address=0x38)
+    air_quality_sensor = adafruit_ens160.ENS160(i2c, address=0x53)
+    temp_humid_sensor = adafruit_ahtx0.AHTx0(i2c)  # This needs be tested!!!
+    air_quality_sensor = adafruit_ens160.ENS160(i2c)
 
 
 print("Logging started. Press Ctrl+C to stop.\n")
@@ -126,7 +133,7 @@ print("Logging started. Press Ctrl+C to stop.\n")
 # This routine shows a simple link in your browser
 @server.route("/")
 def base(request: Request):
-    temp, hum, pres = read_data()
+    temp, hum, pres,x,x1 = read_data(sensorType)
     return Response(request, f"<html><body><h1>AIR QUALITY MONITOR</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
 
 
@@ -180,9 +187,9 @@ async def log_data():
             print(f"New day detected. Logging to new file: {file_name}")
             current_day= now.tm_mday
             startNewFile(file_name) 
-        
-        temp, hum, pres = read_data()  
-         
+        #print(sensorType) 
+
+        temp, hum, pres, x,x1,x2 = read_data(sensorType=sensorType)  
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
         timestamp = f" {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
         try:
@@ -217,17 +224,26 @@ async def main():
     # Run both the logger and the server at the same time
     await asyncio.gather(log_data(), run_server())
 
-def read_data():
+def read_data(sensorType):
     try:
-        temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
-        hum = sensor.relative_humidity
-        pres = sensor.pressure * 0.02953 # converted to inches Hg
+        if sensorType == "BME280":
+            temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
+            hum = sensor.humidity
+            pres = sensor.pressure * 0.02953 # converted to inches Hg
+            return temp, hum, pres, 0 ,0 ,0
+
+        elif sensorType == "ENS160+AHT21":
+            temp = temp_humid_sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
+            hum = temp_humid_sensor.relative_humidity
+            pres = 0  # ENS160 does not measure pressure
+            #air_quality = air_quality_sensor.iaq_index
+            return temp, hum, pres,0 ,0, 0 #, air_quality_sensor.iaq_index, air_quality_sensor.iaq_index_accuracy
+
+
     except Exception as e:
         print(f"Error reading sensor: {e}")
-        temp = 0
-        hum = 0
-        pres = 0
-    return temp, hum, pres
+        
+    return 0,0,0,0,0,0
 
 
 
