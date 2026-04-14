@@ -46,7 +46,7 @@ sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
 storage.mount(vfs, "/sd")
 
-
+"""
 # Connect to WiFi
 #  set static IP address to avoid issues with changing IPs and to make it easier to access the web interface. Make sure the IP address you choose is outside the range of addresses your router assigns via DHCP to avoid conflicts. You can check your router's settings to see the DHCP range and choose an IP address that is not in that range. For example, if your router assigns addresses from
 # Retrieve strings from settings.toml
@@ -59,6 +59,9 @@ gateway = ipaddress.IPv4Address(gateway)    #("192.168.254.254")  #("192.168.254
 print(f"Using IP address: {ipv4}  gateway: {gateway}  netmask: {netmask}")
 
 wifi.radio.set_ipv4_address(ipv4=ipv4, netmask=netmask, gateway=gateway)
+"""
+
+
 #  connect to your SSID
 wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
 
