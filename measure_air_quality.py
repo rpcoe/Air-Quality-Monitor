@@ -27,7 +27,7 @@ from adafruit_httpserver import Server, Request, Response, POST
 from adafruit_httpserver import ChunkedResponse
 
 def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
-    print("New file created, writing header.")
+    print(f"New file created, writing header: {file_name}")
     with open(file_name, "w") as f:
         f.write(" ,Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
 
@@ -111,7 +111,7 @@ try:
         f.write(f"RESTART:  {timestamp}  \n")
 except OSError:
     startNewFile(file_name)  # This will create the file and write the header if it doesn't exist 
-    
+
 # Create sensor object, using the board's default I2C bus.
 global sensorType
 sensorType = os.getenv("SENSOR_TYPE", "NONE").upper()  # Default to NONE if not set
@@ -124,8 +124,6 @@ if sensorType == "BME280":
 if sensorType == "ENS160+AHT21":        # ENS160 for air quality and AHT21 for temp and humidity
     temp_humid_sensor = adafruit_ahtx0.AHTx0(i2c, address=0x38)
     air_quality_sensor = adafruit_ens160.ENS160(i2c, address=0x53)
-    temp_humid_sensor = adafruit_ahtx0.AHTx0(i2c)  # This needs be tested!!!
-    air_quality_sensor = adafruit_ens160.ENS160(i2c)
 
 
 print("Logging started. Press Ctrl+C to stop.\n")
@@ -133,8 +131,8 @@ print("Logging started. Press Ctrl+C to stop.\n")
 # This routine shows a simple link in your browser
 @server.route("/")
 def base(request: Request):
-    temp, hum, pres,x,x1,x2 = read_data(sensorType)
-    return Response(request, f"<html><body><h1>AIR QUALITY MONITOR</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
+    temp, hum, pres,eCO2, TVOC, AQI = read_data(sensorType=sensorType)
+    return Response(request, f"<html><body><h1>AIR QUALITY MONITOR</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><h2>eCO2: {eCO2} ppm</h2><h2>TVOC: {TVOC} ppb</h2><h2>AQI (1-5): {AQI}</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
 
 
 # This routine makes the browser download the file when you visit /download to downloads on your computer. It uses the 'Content-Disposition' header to force the download 
@@ -189,13 +187,13 @@ async def log_data():
             startNewFile(file_name) 
         #print(sensorType) 
 
-        temp, hum, pres, x,x1,x2 = read_data(sensorType=sensorType)  
+        temp, hum, pres, eCO2, TVOC, AQI = read_data(sensorType=sensorType)  
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
         timestamp = f" {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
         try:
             with open(file_name, "a") as f:
-                f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}\n")
-            print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg")
+                f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {eCO2}, {TVOC}, {AQI}\n")
+            print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg, eCO2: {eCO2} ppm, TVOC: {TVOC} ppb, AQI (1-5): {AQI}")
         except OSError as e:
             print(f"Error writing to SD card: {e}")
         await asyncio.sleep(timeIncrement)
@@ -238,15 +236,15 @@ def read_data(sensorType):
             pres = 0  # ENS160 does not measure pressure
             # Feed that data into ENS160 for compensation
             air_quality_sensor.temperature_compensation = temp
-            air_quality_sensor.humidity_compensation = hum  
-            print(f"AQI (1-5): {air_quality_sensor.AQI}")
-            print(f"TVOC: {air_quality_sensor.TVOC} ppb")
-            print(f"eCO2: {air_quality_sensor.eCO2} ppm")
+            air_quality_sensor.humidity_compensation = hum
+            eCO2 = air_quality_sensor.eCO2
+            TVOC = air_quality_sensor.TVOC  
+            AQI = air_quality_sensor.AQI  
+            #print(f"eCO2: {eCO2} ppm, TVOC: {TVOC} ppb, AQI (1-5): {AQI}")
             print(f"Data Validity: {air_quality_sensor.data_validity}")
-            #air_quality = air_quality_sensor.iaq_index
             temp = temp_humid_sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
 
-            return temp, hum, pres,0 ,0, 0 #, air_quality_sensor.iaq_index, air_quality_sensor.iaq_index_accuracy
+            return temp, hum, pres,eCO2 ,TVOC, AQI #, air_quality_sensor.iaq_index, air_quality_sensor.iaq_index_accuracy
 
 
     except Exception as e:
