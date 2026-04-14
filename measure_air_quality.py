@@ -61,7 +61,6 @@ print(f"Using IP address: {ipv4}  gateway: {gateway}  netmask: {netmask}")
 wifi.radio.set_ipv4_address(ipv4=ipv4, netmask=netmask, gateway=gateway)
 
 
-
 #  connect to your SSID
 wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
 
