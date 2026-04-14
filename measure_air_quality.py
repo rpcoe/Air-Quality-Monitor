@@ -133,7 +133,7 @@ print("Logging started. Press Ctrl+C to stop.\n")
 # This routine shows a simple link in your browser
 @server.route("/")
 def base(request: Request):
-    temp, hum, pres,x,x1 = read_data(sensorType)
+    temp, hum, pres,x,x1,x2 = read_data(sensorType)
     return Response(request, f"<html><body><h1>AIR QUALITY MONITOR</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
 
 
@@ -233,13 +233,19 @@ def read_data(sensorType):
             return temp, hum, pres, 0 ,0 ,0
 
         elif sensorType == "ENS160+AHT21":
-            temp = temp_humid_sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
+            temp = temp_humid_sensor.temperature 
             hum = temp_humid_sensor.relative_humidity
             pres = 0  # ENS160 does not measure pressure
+            # Feed that data into ENS160 for compensation
+            air_quality_sensor.temperature_compensation = temp
+            air_quality_sensor.humidity_compensation = hum  
             print(f"AQI (1-5): {air_quality_sensor.AQI}")
             print(f"TVOC: {air_quality_sensor.TVOC} ppb")
             print(f"eCO2: {air_quality_sensor.eCO2} ppm")
+            print(f"Data Validity: {air_quality_sensor.data_validity}")
             #air_quality = air_quality_sensor.iaq_index
+            temp = temp_humid_sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
+
             return temp, hum, pres,0 ,0, 0 #, air_quality_sensor.iaq_index, air_quality_sensor.iaq_index_accuracy
 
 
