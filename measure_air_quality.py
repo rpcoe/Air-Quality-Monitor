@@ -61,6 +61,7 @@ print(f"Using IP address: {ipv4}  gateway: {gateway}  netmask: {netmask}")
 wifi.radio.set_ipv4_address(ipv4=ipv4, netmask=netmask, gateway=gateway)
 
 
+
 #  connect to your SSID
 wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
 
@@ -235,6 +236,9 @@ def read_data(sensorType):
             temp = temp_humid_sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
             hum = temp_humid_sensor.relative_humidity
             pres = 0  # ENS160 does not measure pressure
+            print(f"AQI (1-5): {air_quality_sensor.AQI}")
+            print(f"TVOC: {air_quality_sensor.TVOC} ppb")
+            print(f"eCO2: {air_quality_sensor.eCO2} ppm")
             #air_quality = air_quality_sensor.iaq_index
             return temp, hum, pres,0 ,0, 0 #, air_quality_sensor.iaq_index, air_quality_sensor.iaq_index_accuracy
 
