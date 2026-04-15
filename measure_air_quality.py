@@ -5,13 +5,14 @@
 #  - Add a method to upload data to a cloud service like Google Drive or AWS S3 for remote access and backup
 #  - Add a method to send alerts (e.g. email or SMS) if certain thresholds are exceeded (e.g. high temperature or low pressure)
 
-from time import sleep
+from time import sleep, time
 import os
 import ipaddress
 
 import wifi
 import socketpool
 import asyncio
+import time
 import busio
 import digitalio
 import board
@@ -240,6 +241,11 @@ def read_data(sensorType):
             eCO2 = air_quality_sensor.eCO2
             TVOC = air_quality_sensor.TVOC  
             AQI = air_quality_sensor.AQI  
+            if eCO2 == 0:
+                print("Still receiving 0. Attempting mode refresh...")
+                air_quality_sensor.operation_mode = 2
+        
+                time.sleep(1)#asyncio.sleep(2)
             #print(f"eCO2: {eCO2} ppm, TVOC: {TVOC} ppb, AQI (1-5): {AQI}")
             print(f"Data Validity: {air_quality_sensor.data_validity}")
             temp = temp_humid_sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
