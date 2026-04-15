@@ -7,5 +7,5 @@ Every time a change is made to xxx.py (or code.py) the program automatically res
 Open a serial monitor terminal to see the program output.  
 
 
-A web browser can open the server by loading the IP address of the PicoW or by using the url: 192.168.4.1 on a browser connected to the PicoW through wifi.???
+A web browser can open the server by loading the IP address of the PicoW 
 
