@@ -19,8 +19,6 @@ import board
 import storage
 import adafruit_sdcard
 import adafruit_ntp
-import adafruit_ahtx0
-import adafruit_ens160
 import rtc
 
 from adafruit_bme280 import basic as adafruit_bme280
@@ -127,9 +125,10 @@ if sensorType == "BME280":
     # address can change based on bme device
     # if 0x76 does not work try 0x77 :)
     sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
-if sensorType == "ENS160+AHT21":        # ENS160 for air quality and AHT21 for temp and humidity
-    temp_humid_sensor = adafruit_ahtx0.AHTx0(i2c, address=0x38)
-    air_quality_sensor = adafruit_ens160.ENS160(i2c, address=0x53)
+if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp and humidity
+    #temp_humid_sensor = adafruit_ahtx0.AHTx0(i2c, address=0x38)
+    #air_quality_sensor = adafruit_ens160.ENS160(i2c, address=0x53)
+    sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
 
 
 print("Logging started. Press Ctrl+C to stop.\n")
@@ -236,23 +235,18 @@ def read_data(sensorType):
             pres = sensor.pressure * 0.02953 # converted to inches Hg
             return temp, hum, pres, 0 ,0 ,0
 
-        elif sensorType == "ENS160+AHT21":
-            temp = temp_humid_sensor.temperature 
-            hum = temp_humid_sensor.relative_humidity
+        elif sensorType == "BME680":
+            #temp = temp_humid_sensor.temperature 
+            #hum = temp_humid_sensor.relative_humidity
             pres = 0  # ENS160 does not measure pressure
             # Feed that data into ENS160 for compensation
-            air_quality_sensor.temperature_compensation = temp
-            air_quality_sensor.humidity_compensation = hum
+            #air_quality_sensor.temperature_compensation = temp
+            #air_quality_sensor.humidity_compensation = hum
             eCO2 = air_quality_sensor.eCO2
             TVOC = air_quality_sensor.TVOC  
             AQI = air_quality_sensor.AQI  
-            if eCO2 == 0:
-                print("Still receiving 0. Attempting mode refresh...")
-                air_quality_sensor.operation_mode = 2
-        
-                time.sleep(1)#asyncio.sleep(2)
+            
             #print(f"eCO2: {eCO2} ppm, TVOC: {TVOC} ppb, AQI (1-5): {AQI}")
-            print(f"Data Validity: {air_quality_sensor.data_validity}")
             temp = temp_humid_sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
 
             return temp, hum, pres,eCO2 ,TVOC, AQI #, air_quality_sensor.iaq_index, air_quality_sensor.iaq_index_accuracy
