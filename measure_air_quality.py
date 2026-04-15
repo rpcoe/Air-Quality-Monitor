@@ -39,14 +39,6 @@ led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 
 
-
-# Connect to the card and mount the filesystem.
-spi = busio.SPI(board.GP18, board.GP19, board.GP16)  # SCK, MOSI, MISO
-cs = digitalio.DigitalInOut(board.GP17)  # CS pin for SD card
-sdcard = adafruit_sdcard.SDCard(spi, cs)
-vfs = storage.VfsFat(sdcard)
-storage.mount(vfs, "/sd")
-
 #  to use DHCP instead of static IP, comment out the wifi.radio.set_ipv4_address() line below and uncomment the line below to connect to WiFi using DHCP. Note that using DHCP may cause issues if your router changes the assigned IP address, which can make it difficult to access the web interface. If you choose to use DHCP, you may want to set up a DHCP reservation in your router for the Pico's MAC address to ensure it always gets the same IP address.
 # Connect to WiFi
 #  set static IP address to avoid issues with changing IPs and to make it easier to access the web interface. Make sure the IP address you choose is outside the range of addresses your router assigns via DHCP to avoid conflicts. You can check your router's settings to see the DHCP range and choose an IP address that is not in that range. For example, if your router assigns addresses from
@@ -61,8 +53,6 @@ print(f"Using IP address: {ipv4}  gateway: {gateway}  netmask: {netmask}")
 
 wifi.radio.set_ipv4_address(ipv4=ipv4, netmask=netmask, gateway=gateway)
 
-
-
 #  connect to your SSID
 wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
 
@@ -74,16 +64,31 @@ server = Server(pool, "/sd", debug=True)
 server.socket_timeout = 0.1
 server.start(str(wifi.radio.ipv4_address),port=80)
 
+# Connect to the card and mount the filesystem.
+spi = busio.SPI(board.GP18, board.GP19, board.GP16)  # SCK, MOSI, MISO
+cs = digitalio.DigitalInOut(board.GP17)  # CS pin for SD card
+sdcard = adafruit_sdcard.SDCard(spi, cs)
+vfs = storage.VfsFat(sdcard)
+storage.mount(vfs, "/sd")
+
+
 
 # Create the NTP object after WiFi is connected
 try:
     print("Syncing time with internet...")
     ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+    print(f"NTP time: {ntp.datetime}")
+    
     rtc.RTC().datetime = ntp.datetime  #
     print("Clock synchronized!")
 except Exception as e:
-    print(f"Could not sync time: {e}")
-    print("Logging will proceed with default system time.")
+    if isinstance(e, OSError) and e.args[0] == 110:  # ETIMEDOUT
+        sleep(5)  # Wait a bit before trying again
+        ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+        print("NTP request timed out. Check your internet connection.")
+    else:
+        print(f"Could not sync time: {e}")
+        print("Logging will proceed with default system time.")
 
 # Get the current time from the internal clock
 now = rtc.RTC().datetime
