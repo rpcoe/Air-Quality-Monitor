@@ -1,7 +1,8 @@
 #  TODO List:
+#  - Update webpage to show the most recent data in real time without needing to refresh the page (e.g. using JavaScript to fetch new data every few seconds and update the page dynamically)
+#  - Update wepage to display BME680 gas resistance and calculated eCO2, TVOC, and AQI values once the compensation algorithm is implemented
 #  - Add a simple web interface to view the data without downloading
 #  - Add a graphing library to visualize the data on the web interface
-#  - Add a method to download data in CSV format for easier analysis in Excel or Google Sheets
 #  - Add a method to upload data to a cloud service like Google Drive or AWS S3 for remote access and backup
 #  - Add a method to send alerts (e.g. email or SMS) if certain thresholds are exceeded (e.g. high temperature or low pressure)
 
@@ -12,16 +13,17 @@ import ipaddress
 import wifi
 import socketpool
 import asyncio
-import time
 import busio
 import digitalio
 import board
 import storage
 import adafruit_sdcard
 import adafruit_ntp
+import adafruit_bme680
 import rtc
 
 from adafruit_bme280 import basic as adafruit_bme280
+
 from adafruit_httpserver import Server, Request, Response, POST
 from adafruit_httpserver import ChunkedResponse
 
@@ -71,7 +73,7 @@ storage.mount(vfs, "/sd")
 
 
 
-# Create the NTP object after WiFi is connected
+# Create the Network Time Protocol (NTP) object after WiFi is connected
 try:
     print("Syncing time with internet...")
     ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
@@ -126,10 +128,9 @@ if sensorType == "BME280":
     # if 0x76 does not work try 0x77 :)
     sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
 if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp and humidity
-    #temp_humid_sensor = adafruit_ahtx0.AHTx0(i2c, address=0x38)
-    #air_quality_sensor = adafruit_ens160.ENS160(i2c, address=0x53)
-    sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
-
+    sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x76)  # or try 0x77
+    # Change this to match your local sea level pressure (hPa) for altitude
+    sensor.sea_level_pressure = 1013.25
 
 print("Logging started. Press Ctrl+C to stop.\n")
 
@@ -192,13 +193,13 @@ async def log_data():
             startNewFile(file_name) 
         #print(sensorType) 
 
-        temp, hum, pres, eCO2, TVOC, AQI = read_data(sensorType=sensorType)  
+        temp, hum, pres, resistance, eCO2, TVOC = read_data(sensorType=sensorType)  
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
         timestamp = f" {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
         try:
             with open(file_name, "a") as f:
-                f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {eCO2}, {TVOC}, {AQI}\n")
-            print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg, eCO2: {eCO2} ppm, TVOC: {TVOC} ppb, AQI (1-5): {AQI}")
+                f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {eCO2}, {TVOC}\n")  #, {AQI}\n")
+            print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg, Resistance: {resistance}, eCO2: {eCO2} ppm, TVOC: {TVOC} ppb, Resistance: {resistance} ohms\n")  #AQI (1-5): {AQI}")
         except OSError as e:
             print(f"Error writing to SD card: {e}")
         await asyncio.sleep(timeIncrement)
@@ -236,20 +237,21 @@ def read_data(sensorType):
             return temp, hum, pres, 0 ,0 ,0
 
         elif sensorType == "BME680":
-            #temp = temp_humid_sensor.temperature 
-            #hum = temp_humid_sensor.relative_humidity
-            pres = 0  # ENS160 does not measure pressure
+            temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
+            hum = sensor.relative_humidity
+            pres = sensor.pressure * 0.02953 # converted to inches Hg
+            #altitude = sensor.altitude 
             # Feed that data into ENS160 for compensation
             #air_quality_sensor.temperature_compensation = temp
             #air_quality_sensor.humidity_compensation = hum
-            eCO2 = air_quality_sensor.eCO2
-            TVOC = air_quality_sensor.TVOC  
-            AQI = air_quality_sensor.AQI  
+            resistance = sensor.gas  # Get the gas resistance value from the BME680
+            #eCO2 = air_quality_sensor.eCO2
+            #TVOC = air_quality_sensor.TVOC  
+            #AQI = air_quality_sensor.AQI  
             
             #print(f"eCO2: {eCO2} ppm, TVOC: {TVOC} ppb, AQI (1-5): {AQI}")
-            temp = temp_humid_sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
 
-            return temp, hum, pres,eCO2 ,TVOC, AQI #, air_quality_sensor.iaq_index, air_quality_sensor.iaq_index_accuracy
+            return temp, hum, pres, resistance, 0, 0 #, eCO2, TVOC, AQI need to be calculated based on the gas resistance and compensation values, which requires additional code to implement the ENS160 algorithm. For now, we will return 0 for these values as placeholders.
 
 
     except Exception as e:
