@@ -77,7 +77,7 @@ storage.mount(vfs, "/sd")
 try:
     print("Syncing time with internet...")
     ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
-    print(f"NTP time: {ntp.datetime}")
+    #print(f"NTP time: {ntp.datetime}")
     
     rtc.RTC().datetime = ntp.datetime  #
     print("Clock synchronized!")
@@ -102,7 +102,8 @@ current_day = now.tm_mday  # Set to current day to start logging to the correct 
 #current_day = 2  # Hardcoded for testing
 
 # Build the filename 
-file_name = f"/sd/log_{date_string}.txt"
+filePrefix = os.getenv("FILE_PREFIX")   
+file_name = f"/sd/{filePrefix}_{date_string}.txt"
 
 print(f"Current filename: {file_name}")
 
@@ -137,8 +138,9 @@ print("Logging started. Press Ctrl+C to stop.\n")
 # This routine shows a simple link in your browser
 @server.route("/")
 def base(request: Request):
-    temp, hum, pres,eCO2, TVOC, AQI = read_data(sensorType=sensorType)
-    return Response(request, f"<html><body><h1>AIR QUALITY MONITOR</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><h2>eCO2: {eCO2} ppm</h2><h2>TVOC: {TVOC} ppb</h2><h2>AQI (1-5): {AQI}</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
+    temp, hum, pres, resistance, eCO2, TVOC = read_data(sensorType=sensorType) 
+    #temp, hum, pres,eCO2, TVOC, AQI = read_data(sensorType=sensorType)
+    return Response(request, f"<html><body><h1>AIR QUALITY MONITOR</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><h2>eCO2: {eCO2} ppm</h2><h2>TVOC: {TVOC} ppb</h2><h2>Resistance: {resistance} ohms</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")  #<h2>AQI (1-5): {AQI}</h2>
 
 
 # This routine makes the browser download the file when you visit /download to downloads on your computer. It uses the 'Content-Disposition' header to force the download 
@@ -187,7 +189,7 @@ async def log_data():
         if current_day != now.tm_mday:          # Update the date string and filename for the new day
 
             date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
-            file_name = f"/sd/log_{date_string}.txt"
+            file_name = f"/sd/{filePrefix}_{date_string}.txt"
             print(f"New day detected. Logging to new file: {file_name}")
             current_day= now.tm_mday
             startNewFile(file_name) 
@@ -199,7 +201,7 @@ async def log_data():
         try:
             with open(file_name, "a") as f:
                 f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {eCO2}, {TVOC}\n")  #, {AQI}\n")
-            print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg, Resistance: {resistance}, eCO2: {eCO2} ppm, TVOC: {TVOC} ppb, Resistance: {resistance} ohms\n")  #AQI (1-5): {AQI}")
+            print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg, Resistance: {resistance} ohms, eCO2: {eCO2} ppm, TVOC: {TVOC} ppb \n")  #AQI (1-5): {AQI}")
         except OSError as e:
             print(f"Error writing to SD card: {e}")
         await asyncio.sleep(timeIncrement)
