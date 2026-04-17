@@ -27,6 +27,39 @@ from adafruit_bme280 import basic as adafruit_bme280
 from adafruit_httpserver import Server, Request, Response, POST
 from adafruit_httpserver import ChunkedResponse
 
+
+def update_RTC_from_NTP():
+    try:
+        print("Syncing time with internet...")
+        ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+        rtc.RTC().datetime = ntp.datetime 
+        print("Clock synchronized!")
+    except Exception as e:
+        if isinstance(e, OSError) and e.args[0] == 110:  # ETIMEDOUT
+            sleep(5)  # Wait a bit before trying again
+            print("NTP request timed out. Will try again.")
+            ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+            rtc.RTC().datetime = ntp.datetime
+        else:
+            print(f"Could not sync time: {e}")
+            print("Logging will proceed with default system time.")
+# Create the Network Time Protocol (NTP) object after WiFi is connected
+    try:
+        print("Syncing time with internet...")
+        ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+        rtc.RTC().datetime = ntp.datetime 
+        #print(f"NTP time: {ntp.datetime}")
+        print("Clock synchronized!")
+    except Exception as e:
+        if isinstance(e, OSError) and e.args[0] == 110:  # ETIMEDOUT
+            sleep(5)  # Wait a bit before trying again
+            print("NTP request timed out. Will try again.")
+            ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+            rtc.RTC().datetime = ntp.datetime
+        else:
+            print(f"Could not sync time: {e}")
+            print("Logging will proceed with default system time.")
+
 def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
     print(f"New file created, writing header: {file_name}")
     with open(file_name, "w") as f:
@@ -73,22 +106,7 @@ storage.mount(vfs, "/sd")
 
 
 
-# Create the Network Time Protocol (NTP) object after WiFi is connected
-try:
-    print("Syncing time with internet...")
-    ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
-    #print(f"NTP time: {ntp.datetime}")
-    
-    rtc.RTC().datetime = ntp.datetime  #
-    print("Clock synchronized!")
-except Exception as e:
-    if isinstance(e, OSError) and e.args[0] == 110:  # ETIMEDOUT
-        sleep(5)  # Wait a bit before trying again
-        ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
-        print("NTP request timed out. Check your internet connection.")
-    else:
-        print(f"Could not sync time: {e}")
-        print("Logging will proceed with default system time.")
+update_RTC_from_NTP()  # Sync the RTC with NTP time at startup
 
 # Get the current time from the internal clock
 now = rtc.RTC().datetime
@@ -193,6 +211,7 @@ async def log_data():
             print(f"New day detected. Logging to new file: {file_name}")
             current_day= now.tm_mday
             startNewFile(file_name) 
+            update_RTC_from_NTP()   # Sync the RTC with NTP time at the start of each new day to ensure accurate timestamps, especially if the device has been running for a long time and may have drifted.
         #print(sensorType) 
 
         temp, hum, pres, resistance, eCO2, TVOC = read_data(sensorType=sensorType)  
