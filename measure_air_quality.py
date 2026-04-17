@@ -147,9 +147,9 @@ if sensorType == "BME280":
     # if 0x76 does not work try 0x77 :)
     sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
 if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp and humidity
-    sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x76)  # or try 0x77
+    sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x77)  
     # Change this to match your local sea level pressure (hPa) for altitude
-    sensor.sea_level_pressure = 1013.25
+    #sensor.sea_level_pressure = 1013.25
 
 print("Logging started. Press Ctrl+C to stop.\n")
 
@@ -212,7 +212,6 @@ async def log_data():
             current_day= now.tm_mday
             startNewFile(file_name) 
             update_RTC_from_NTP()   # Sync the RTC with NTP time at the start of each new day to ensure accurate timestamps, especially if the device has been running for a long time and may have drifted.
-        #print(sensorType) 
 
         temp, hum, pres, resistance, eCO2, TVOC = read_data(sensorType=sensorType)  
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
@@ -220,7 +219,7 @@ async def log_data():
         try:
             with open(file_name, "a") as f:
                 f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {eCO2}, {TVOC}\n")  #, {AQI}\n")
-            print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg, Resistance: {resistance} ohms, eCO2: {eCO2} ppm, TVOC: {TVOC} ppb \n")  #AQI (1-5): {AQI}")
+            print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg, Resistance: {resistance} ohms, eCO2: {eCO2} ppm, TVOC: {TVOC} ppb")  #AQI (1-5): {AQI}")
         except OSError as e:
             print(f"Error writing to SD card: {e}")
         await asyncio.sleep(timeIncrement)
