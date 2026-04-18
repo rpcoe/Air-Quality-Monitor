@@ -1,7 +1,8 @@
 #  TODO List:
+#  - Update webpage to show the most recent data in real time without needing to refresh the page (e.g. using JavaScript to fetch new data every few seconds and update the page dynamically)
+#  - Update wepage to display BME680 gas resistance and calculated eCO2, TVOC, and AQI values once the compensation algorithm is implemented
 #  - Add a simple web interface to view the data without downloading
 #  - Add a graphing library to visualize the data on the web interface
-#  - Add a method to download data in CSV format for easier analysis in Excel or Google Sheets
 #  - Add a method to upload data to a cloud service like Google Drive or AWS S3 for remote access and backup
 #  - Add a method to send alerts (e.g. email or SMS) if certain thresholds are exceeded (e.g. high temperature or low pressure)
 
@@ -12,20 +13,52 @@ import ipaddress
 import wifi
 import socketpool
 import asyncio
-import time
 import busio
 import digitalio
 import board
 import storage
 import adafruit_sdcard
 import adafruit_ntp
-import adafruit_ahtx0
-import adafruit_ens160
+import adafruit_bme680
 import rtc
 
 from adafruit_bme280 import basic as adafruit_bme280
+
 from adafruit_httpserver import Server, Request, Response, POST
 from adafruit_httpserver import ChunkedResponse
+
+
+def update_RTC_from_NTP():
+    try:
+        print("Syncing time with internet...")
+        ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+        rtc.RTC().datetime = ntp.datetime 
+        print("Clock synchronized!")
+    except Exception as e:
+        if isinstance(e, OSError) and e.args[0] == 110:  # ETIMEDOUT
+            sleep(5)  # Wait a bit before trying again
+            print("NTP request timed out. Will try again.")
+            ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+            rtc.RTC().datetime = ntp.datetime
+        else:
+            print(f"Could not sync time: {e}")
+            print("Logging will proceed with default system time.")
+# Create the Network Time Protocol (NTP) object after WiFi is connected
+    try:
+        print("Syncing time with internet...")
+        ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+        rtc.RTC().datetime = ntp.datetime 
+        #print(f"NTP time: {ntp.datetime}")
+        print("Clock synchronized!")
+    except Exception as e:
+        if isinstance(e, OSError) and e.args[0] == 110:  # ETIMEDOUT
+            sleep(5)  # Wait a bit before trying again
+            print("NTP request timed out. Will try again.")
+            ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+            rtc.RTC().datetime = ntp.datetime
+        else:
+            print(f"Could not sync time: {e}")
+            print("Logging will proceed with default system time.")
 
 def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
     print(f"New file created, writing header: {file_name}")
@@ -73,22 +106,7 @@ storage.mount(vfs, "/sd")
 
 
 
-# Create the NTP object after WiFi is connected
-try:
-    print("Syncing time with internet...")
-    ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
-    print(f"NTP time: {ntp.datetime}")
-    
-    rtc.RTC().datetime = ntp.datetime  #
-    print("Clock synchronized!")
-except Exception as e:
-    if isinstance(e, OSError) and e.args[0] == 110:  # ETIMEDOUT
-        sleep(5)  # Wait a bit before trying again
-        ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
-        print("NTP request timed out. Check your internet connection.")
-    else:
-        print(f"Could not sync time: {e}")
-        print("Logging will proceed with default system time.")
+update_RTC_from_NTP()  # Sync the RTC with NTP time at startup
 
 # Get the current time from the internal clock
 now = rtc.RTC().datetime
@@ -102,7 +120,8 @@ current_day = now.tm_mday  # Set to current day to start logging to the correct 
 #current_day = 2  # Hardcoded for testing
 
 # Build the filename 
-file_name = f"/sd/log_{date_string}.txt"
+filePrefix = os.getenv("FILE_PREFIX")   
+file_name = f"/sd/{filePrefix}_{date_string}.txt"
 
 print(f"Current filename: {file_name}")
 
@@ -127,18 +146,19 @@ if sensorType == "BME280":
     # address can change based on bme device
     # if 0x76 does not work try 0x77 :)
     sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
-if sensorType == "ENS160+AHT21":        # ENS160 for air quality and AHT21 for temp and humidity
-    temp_humid_sensor = adafruit_ahtx0.AHTx0(i2c, address=0x38)
-    air_quality_sensor = adafruit_ens160.ENS160(i2c, address=0x53)
-
+if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp and humidity
+    sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x77)  
+    # Change this to match your local sea level pressure (hPa) for altitude
+    #sensor.sea_level_pressure = 1013.25
 
 print("Logging started. Press Ctrl+C to stop.\n")
 
 # This routine shows a simple link in your browser
 @server.route("/")
 def base(request: Request):
-    temp, hum, pres,eCO2, TVOC, AQI = read_data(sensorType=sensorType)
-    return Response(request, f"<html><body><h1>AIR QUALITY MONITOR</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><h2>eCO2: {eCO2} ppm</h2><h2>TVOC: {TVOC} ppb</h2><h2>AQI (1-5): {AQI}</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")
+    temp, hum, pres, resistance, eCO2, TVOC = read_data(sensorType=sensorType) 
+    #temp, hum, pres,eCO2, TVOC, AQI = read_data(sensorType=sensorType)
+    return Response(request, f"<html><body><h1>AIR QUALITY MONITOR</h1><h2>Temp: {temp:.1f} degF</h2><h2>Humidity: {hum:.1f}%</h2><h2>Pressure: {pres:.2f} inHg</h2><h2>eCO2: {eCO2} ppm</h2><h2>TVOC: {TVOC} ppb</h2><h2>Resistance: {resistance} ohms</h2><a href='/download'>Click here to download {file_name}</a></body></html>", content_type="text/html")  #<h2>AQI (1-5): {AQI}</h2>
 
 
 # This routine makes the browser download the file when you visit /download to downloads on your computer. It uses the 'Content-Disposition' header to force the download 
@@ -187,19 +207,19 @@ async def log_data():
         if current_day != now.tm_mday:          # Update the date string and filename for the new day
 
             date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
-            file_name = f"/sd/log_{date_string}.txt"
+            file_name = f"/sd/{filePrefix}_{date_string}.txt"
             print(f"New day detected. Logging to new file: {file_name}")
             current_day= now.tm_mday
             startNewFile(file_name) 
-        #print(sensorType) 
+            update_RTC_from_NTP()   # Sync the RTC with NTP time at the start of each new day to ensure accurate timestamps, especially if the device has been running for a long time and may have drifted.
 
-        temp, hum, pres, eCO2, TVOC, AQI = read_data(sensorType=sensorType)  
+        temp, hum, pres, resistance, eCO2, TVOC = read_data(sensorType=sensorType)  
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
         timestamp = f" {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
         try:
             with open(file_name, "a") as f:
-                f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {eCO2}, {TVOC}, {AQI}\n")
-            print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg, eCO2: {eCO2} ppm, TVOC: {TVOC} ppb, AQI (1-5): {AQI}")
+                f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {eCO2}, {TVOC}\n")  #, {AQI}\n")
+            print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg, Resistance: {resistance} ohms, eCO2: {eCO2} ppm, TVOC: {TVOC} ppb")  #AQI (1-5): {AQI}")
         except OSError as e:
             print(f"Error writing to SD card: {e}")
         await asyncio.sleep(timeIncrement)
@@ -236,26 +256,22 @@ def read_data(sensorType):
             pres = sensor.pressure * 0.02953 # converted to inches Hg
             return temp, hum, pres, 0 ,0 ,0
 
-        elif sensorType == "ENS160+AHT21":
-            temp = temp_humid_sensor.temperature 
-            hum = temp_humid_sensor.relative_humidity
-            pres = 0  # ENS160 does not measure pressure
+        elif sensorType == "BME680":
+            temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
+            hum = sensor.relative_humidity
+            pres = sensor.pressure * 0.02953 # converted to inches Hg
+            #altitude = sensor.altitude 
             # Feed that data into ENS160 for compensation
-            air_quality_sensor.temperature_compensation = temp
-            air_quality_sensor.humidity_compensation = hum
-            eCO2 = air_quality_sensor.eCO2
-            TVOC = air_quality_sensor.TVOC  
-            AQI = air_quality_sensor.AQI  
-            if eCO2 == 0:
-                print("Still receiving 0. Attempting mode refresh...")
-                air_quality_sensor.operation_mode = 2
-        
-                time.sleep(1)#asyncio.sleep(2)
+            #air_quality_sensor.temperature_compensation = temp
+            #air_quality_sensor.humidity_compensation = hum
+            resistance = sensor.gas  # Get the gas resistance value from the BME680
+            #eCO2 = air_quality_sensor.eCO2
+            #TVOC = air_quality_sensor.TVOC  
+            #AQI = air_quality_sensor.AQI  
+            
             #print(f"eCO2: {eCO2} ppm, TVOC: {TVOC} ppb, AQI (1-5): {AQI}")
-            print(f"Data Validity: {air_quality_sensor.data_validity}")
-            temp = temp_humid_sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
 
-            return temp, hum, pres,eCO2 ,TVOC, AQI #, air_quality_sensor.iaq_index, air_quality_sensor.iaq_index_accuracy
+            return temp, hum, pres, resistance, 0, 0 #, eCO2, TVOC, AQI need to be calculated based on the gas resistance and compensation values, which requires additional code to implement the ENS160 algorithm. For now, we will return 0 for these values as placeholders.
 
 
     except Exception as e:
