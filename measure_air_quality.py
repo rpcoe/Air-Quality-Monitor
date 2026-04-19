@@ -63,9 +63,10 @@ def update_RTC_from_NTP():
 def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
     print(f"New file created, writing header: {file_name}")
     with open(file_name, "w") as f:
-        f.write(" ,Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
+        f.write("AIR QUALITY MONITOR LOG  {time_stamp}\n")
+        f.write(" Time, Temp(degF), Humidity(%), Pressure(inHg), Resistance(Ohms)\n")
 
-timeIncrement = 30  # Set the time increment in seconds for logging data. Adjust as needed, but remember that very short intervals may fill up the SD card quickly and may not be necessary for air quality monitoring.
+timeIncrement = 60  # Set the time increment in seconds for logging data. Adjust as needed, but remember that very short intervals may fill up the SD card quickly and may not be necessary for air quality monitoring.
 ledTime = .01       # time that the led is flashing each cycle
 
 led = digitalio.DigitalInOut(board.LED)
@@ -116,8 +117,7 @@ now = rtc.RTC().datetime
 # Format the date as YYYY-MM-DD (e.g., 2026-04-09)
 date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
 current_day = now.tm_mday  # Set to current day to start logging to the correct file
-#date_string = "2026-04-03"  # Hardcoded for testing
-#current_day = 2  # Hardcoded for testing
+##date_string = "2026-04-03"  # Hardcoded for testing
 
 # Build the filename 
 filePrefix = os.getenv("FILE_PREFIX")   

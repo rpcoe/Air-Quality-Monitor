@@ -20,8 +20,10 @@ now = rtc.RTC().datetime
 date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
 #date_string = "2026-04-07"  # Hardcoded for testing
 
-# Build the filename
-file_name = f"/sd/log_{date_string}.txt"
+# Build the filename 
+filePrefix = os.getenv("FILE_PREFIX")   
+file_name = f"/sd/{filePrefix}_{date_string}.txt"
+#file_name = f"/sd/AQ1_{date_string}.txt"
 
 while True:
     print("\nfile_name:", file_name)
@@ -34,7 +36,7 @@ while True:
     #sleep(1)  # Need to input a new index # to read a different file
     print("Enter a new file date to display: YYYY-MM-DD")
     date_input = input()
-    file_name = f"/sd/log_{date_input}.txt"#print(f"Index changed to: {index}")
+    file_name = f"/sd/{filePrefix}_{date_input}.txt"
     print("File changed to: ", file_name)
     sleep(3)  # Sleep to allow time for the file to be read before the next input
 
