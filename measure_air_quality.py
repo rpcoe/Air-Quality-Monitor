@@ -21,6 +21,9 @@ import adafruit_sdcard
 import adafruit_ntp
 import adafruit_bme680
 import rtc
+import adafruit_requests
+import ssl
+import gc
 
 from adafruit_bme280 import basic as adafruit_bme280
 
@@ -66,7 +69,24 @@ def startNewFile(file_name):  # This will create the file and write the header i
         f.write("AIR QUALITY MONITOR LOG  {time_stamp}\n")
         f.write(" Time, Temp(degF), Humidity(%), Pressure(inHg), Resistance(Ohms)\n")
 
-timeIncrement = 60  # Set the time increment in seconds for logging data. Adjust as needed, but remember that very short intervals may fill up the SD card quickly and may not be necessary for air quality monitoring.
+def send_to_google(data_string):
+    gc.collect()
+    response = None
+    try:
+        # 1. Explicitly set a shorter timeout to prevent hanging
+        # 2. Use the 'with' context for the request
+        with requests.post(GOOGLE_URL, data=data_string, timeout=10) as response:
+            print(f"Cloud Sync Success: {response.text}")
+    except Exception as e:
+        print(f"Cloud Sync Error: {e}")
+    finally:
+        # This is the "Force Clear" for EINPROGRESS
+        if response is not None:
+            response.close()
+        gc.collect()
+
+timeIncrement = 15
+  # Set the time increment in seconds for logging data. Adjust as needed, but remember that very short intervals may fill up the SD card quickly and may not be necessary for air quality monitoring.
 ledTime = .01       # time that the led is flashing each cycle
 
 led = digitalio.DigitalInOut(board.LED)
@@ -77,6 +97,7 @@ led.direction = digitalio.Direction.OUTPUT
 # Connect to WiFi
 #  set static IP address to avoid issues with changing IPs and to make it easier to access the web interface. Make sure the IP address you choose is outside the range of addresses your router assigns via DHCP to avoid conflicts. You can check your router's settings to see the DHCP range and choose an IP address that is not in that range. For example, if your router assigns addresses from
 # Retrieve strings from settings.toml
+
 ipv4 = os.getenv("IP_ADDRESS")   #ipaddress.IPv4Address("os.getenv('IP_ADDRESS')")
 gateway = os.getenv("MY_GATEWAY")
 netmask = os.getenv("MY_NETMASK")
@@ -85,11 +106,12 @@ netmask = ipaddress.IPv4Address(netmask)  #netmask = ipaddress.IPv4Address("255.
 gateway = ipaddress.IPv4Address(gateway)    #("192.168.254.254")  #("192.168.254.254")
 print(f"Using IP address: {ipv4}  gateway: {gateway}  netmask: {netmask}")
 
-wifi.radio.set_ipv4_address(ipv4=ipv4, netmask=netmask, gateway=gateway)
+#wifi.radio.set_ipv4_address(ipv4=ipv4, netmask=netmask, gateway=gateway)
 
 #  connect to your SSID
 wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
 
+#wifi.radio.connect()
 print(f"Connected! Visit http://{wifi.radio.ipv4_address}\n")
 
 pool = socketpool.SocketPool(wifi.radio)
@@ -97,7 +119,8 @@ server = Server(pool, "/sd", debug=True)
 # We add a short timeout so poll() doesn't hang or crash if nothing is happening
 server.socket_timeout = 0.1
 server.start(str(wifi.radio.ipv4_address),port=80)
-
+requests = adafruit_requests.Session(pool, ssl.create_default_context())
+GOOGLE_URL = "https://script.google.com/macros/s/AKfycbwm3MqHXCctVr5MR9NevO448VF6aZekrgrpKhTuyuaQEKOQdm7kny2iDAmOa8GxrMUe3w/exec"
 # Connect to the card and mount the filesystem.
 spi = busio.SPI(board.GP18, board.GP19, board.GP16)  # SCK, MOSI, MISO
 cs = digitalio.DigitalInOut(board.GP17)  # CS pin for SD card
@@ -216,12 +239,19 @@ async def log_data():
         temp, hum, pres, resistance, eCO2, TVOC = read_data(sensorType=sensorType)  
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
         timestamp = f" {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
+        log_line = f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {eCO2}, {TVOC}"
+
         try:
             with open(file_name, "a") as f:
-                f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {eCO2}, {TVOC}\n")  #, {AQI}\n")
+                f.write(log_line + "\n")
+            #    f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {eCO2}, {TVOC}\n")  #, {AQI}\n")
             print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg, Resistance: {resistance} ohms, eCO2: {eCO2} ppm, TVOC: {TVOC} ppb")  #AQI (1-5): {AQI}")
         except OSError as e:
             print(f"Error writing to SD card: {e}")
+        # Note: We send 'log_line', not 'timestamp', to ensure all columns are filled
+        await asyncio.sleep(0.5) # Give the WiFi chip a breather before trying to send data to the cloud, which can help prevent timeouts and allow the logging to complete first. Adjust this delay as needed based on your specific use case and network conditions.
+        #send_to_google(log_line)
+        send_to_google("test 123")  # Test line to verify cloud sync is working, can be removed later
         await asyncio.sleep(timeIncrement)
     
 async def run_server():
@@ -242,7 +272,7 @@ async def run_server():
         led.value = False
         
         # This is CRITICAL: it allows the logger task to run
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.1)
 
 async def main():
     # Run both the logger and the server at the same time
