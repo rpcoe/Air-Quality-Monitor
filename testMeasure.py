@@ -101,5 +101,6 @@ while True:
     send_to_adafruit("humidity", f"{hum:.1f}")
     send_to_adafruit("pressure", f"{pres:.1f}")
     send_to_adafruit("resistance", f"{resistance:.1f}")
+    print("Data sent to Adafruit IO. Waiting for next reading...\n")
 
-    time.sleep(10)  # Send every 10 seconds
+    time.sleep(30)  # Send every 30 seconds
