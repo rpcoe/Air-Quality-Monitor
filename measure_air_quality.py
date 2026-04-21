@@ -26,24 +26,10 @@ from adafruit_bme280 import basic as adafruit_bme280
 
 from adafruit_httpserver import Server, Request, Response, POST
 from adafruit_httpserver import ChunkedResponse
-import adafruit_requests
-import adafruit_connection_manager
+#import adafruit_requests
+#import adafruit_connection_manager
 
-# ── Config ────────────────────────────────────────────
-AIO_USERNAME  = os.getenv("AIO_USERNAME")
-AIO_KEY       = os.getenv("AIO_KEY")
-AIO_URL       = f"https://io.adafruit.com/api/v2/{AIO_USERNAME}/feeds"
-# ──────────────────────────────────────────────────────
 
-def send_to_adafruit(feed_name, value):
-    url = f"{AIO_URL}/{feed_name}/data"
-    payload = f'{{"value": "{value}"}}'
-    try:
-        response = https.post(url, headers=headers, data=payload)
-        print(f"Sent {feed_name}={value} → {response.status_code}")
-        response.close()
-    except Exception as e:
-        print(f"Error sending {feed_name}:", e)
 
 
 def update_RTC_from_NTP():
@@ -116,22 +102,14 @@ cs = digitalio.DigitalInOut(board.GP17)  # CS pin for SD card
 sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
 storage.mount(vfs, "/sd")
-"""
+
 pool = socketpool.SocketPool(wifi.radio)
 server = Server(pool, "/sd", debug=True)
 # We add a short timeout so poll() doesn't hang or crash if nothing is happening
 server.socket_timeout = 0.1
 server.start(str(wifi.radio.ipv4_address),port=80)
-"""
-# Set up HTTPS session
-pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
-ssl_context = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
-https = adafruit_requests.Session(pool, ssl_context)
 
-headers = {
-    "X-AIO-Key": AIO_KEY,
-    "Content-Type": "application/json"
-}
+
 
 
 
@@ -184,7 +162,7 @@ if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp an
 print("Logging started. Press Ctrl+C to stop.\n")
 
 # This routine shows a simple link in your browser
-#@server.route("/")
+@server.route("/")
 def base(request: Request):
     temp, hum, pres, resistance, eCO2, TVOC = read_data(sensorType=sensorType) 
     #temp, hum, pres,eCO2, TVOC, AQI = read_data(sensorType=sensorType)
@@ -195,8 +173,7 @@ def base(request: Request):
 # # We use a generator to read the file in chunks so we don't run out of limited RAM on the Pico
 # Note: this is a very basic implementation and does not include error handling for file not found or other issues. It also assumes the file is small enough to be read in chunks of 512 bytes without causing issues. 
 
-#@server.route("/download")
-#@server.route("/download")
+@server.route("/download")
 def download_file(request: Request):
     global file_name # Ensure we are using the most recent filename
     
@@ -254,8 +231,6 @@ async def log_data():
         except OSError as e:
             print(f"Error writing to SD card: {e}")
             
-        send_to_adafruit("temperature", temp)
-        send_to_adafruit("humidity", hum)    
 
         await asyncio.sleep(timeIncrement)
     
@@ -263,7 +238,7 @@ async def run_server():
     """Task to handle browser requests."""
     #print("Server task started...")
     while True:
-        """
+        
         try:
             # poll() checks for incoming browser requests
             server.poll()
@@ -271,7 +246,7 @@ async def run_server():
             # This catches "Soft" errors like timeouts without stopping the script
             print(f"Server poll error: {e}") 
             pass
-        """
+        
         # Flash LED to show activity
         led.value = True
         sleep(ledTime)

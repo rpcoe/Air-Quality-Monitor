@@ -93,9 +93,8 @@ if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp an
 print("Logging started. Press Ctrl+C to stop.\n")
 
 while True:
-    # Replace these with your actual sensor readings
-    temp = 23.5
-    hum    = 75
+    # Get the actual sensor readings
+    
     temp, hum, pres, resistance, eCO2, TVOC = read_data(sensorType=sensorType)  
 
     send_to_adafruit("temperature", f"{temp:.1f}")
