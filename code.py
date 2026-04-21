@@ -3,4 +3,4 @@
 #import read_sd_card 
 #import webServerGemini
 #import simpleTest
-import testMeasure
+import measure_sensor_only
