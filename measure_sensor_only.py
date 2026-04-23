@@ -34,8 +34,12 @@ SEALEVELPRESSURE_HPA = 1013.25
 # OpenWeather API Configuration
 CITY = "Redondo Beach"
 COUNTRY_CODE = "US"
-UNITS = "metric" # 'metric' for hPa
+UNITS = "metric"  # 'metric' for hPa
 API_URL = f"http://api.openweathermap.org/data/2.5/weather?q={CITY},{COUNTRY_CODE}&appid={os.getenv('OPENWEATHER_TOKEN')}&units={UNITS}"
+            # Version 2.5 of the OpenWeather API is used here, which provides current weather data including sea level pressure.
+            # This version is deprecated but still functional. You can also use version 3.0 of the API, which may require adjustments to the URL and response parsing.
+            #   and also requires a credit card for the free tier, so version 2.5 is used here for simplicity and accessibility.
+
 # ──────────────────────────────────────────────────────
 # Connect to WiFi
 print("Connecting to WiFi...")
@@ -87,17 +91,21 @@ def read_data(sensorType):
         
     return 0,0,0,0,0,0
 
-def get_sea_level_pressure():
-    print(f"Fetching weather for {CITY}...")
+def get_sea_level_pressure(first_run=False):
+    print(f"Fetching sea level pressure for {CITY}...")
     global last_SL_pressure
     try:
         response = requests.get(API_URL)
         data = response.json()
-        
+        #print (f"API Response: {data}")  # Debug print to see the full API response
         # OpenWeather provides 'pressure' in the 'main' dictionary.
         # By default, this is the pressure at sea level for that location.
-        #print(f"API Response: {data}")  # Debug print to see the full API response
-        last_SL_pressure =sea_level_pressure = data["main"]["pressure"]
+        # A change of 1 hPa corresponds to a change of 27 feet in altitude, so we can use this value directly for our sea level pressure.
+        if first_run:
+            sea_level_pressure = data["main"]["pressure"]  # Use the initial pressure reading as the starting point for sea level pressure
+        else:
+            sea_level_pressure = 0.95 * last_SL_pressure + 0.05 * data["main"]["pressure"] #
+            last_SL_pressure =sea_level_pressure # Update the last known sea level pressure with the new value
         
         response.close()
     except Exception as e:
@@ -109,8 +117,8 @@ def get_sea_level_pressure():
 # ── Main loop ─────────────────────────────────────────
 global sensorType
 global last_SL_pressure 
-last_SL_pressure = SEALEVELPRESSURE_HPA  # Default sea level pressure in hPa
-
+#last_SL_pressure = SEALEVELPRESSURE_HPA  # Default sea level pressure in hPa
+last_SL_pressure = get_sea_level_pressure(True)
 sensorType = os.getenv("SENSOR_TYPE", "NONE").upper()  # Default to NONE if not set
 if sensorType != "NONE":
     i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
@@ -124,10 +132,10 @@ if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp an
                             # you can adjust it to your local sea level pressure for more accurate altitude readings
                             # This will be different based on your location and weather conditions, so you may want to update it periodically for better accuracy. 
                             # You can find the current sea level pressure for your location from a local weather station or online weather service.
-    pressure = get_sea_level_pressure()     # this nominal sealevel pressure is used to calculate altitude,
-    sensor.sea_level_pressure = pressure
+pressure = get_sea_level_pressure(False)     # this nominal sealevel pressure is used to calculate altitude,
+sensor.sea_level_pressure = pressure
 
-    print(f"Current Sea Level Pressure: {pressure} hPa")
+print(f"Current Sea Level Pressure: {pressure} hPa")
 
 # The first reading can be inaccurate, so we take an initial reading and discard it
 temp, hum, pres, resistance, altitude,eCO2,  = read_data(sensorType=sensorType)    
@@ -137,12 +145,12 @@ print("Logging started. Press Ctrl+C to stop.\n")
 while True:
 
     # Get the actual sensor readings
-    sensor.sea_level_pressure = get_sea_level_pressure()  # Update sea level pressure before each reading for better altitude accuracy  
+    sensor.sea_level_pressure = get_sea_level_pressure(False)  # Update sea level pressure before each reading for better altitude accuracy  
     temp, hum, pres, resistance, alt, eCO2,  = read_data(sensorType=sensorType)    
     alt = alt * 3.28084 # convert to feet
     send_to_adafruit("temperature", f"{temp:.1f}")
     send_to_adafruit("humidity", f"{hum:.1f}")
-    send_to_adafruit("pressure", f"{pres:.1f}")
+    send_to_adafruit("pressure", f"{pres:.2f}")
     send_to_adafruit("resistance", f"{resistance:.1f}")
     send_to_adafruit("altitude", f"{alt:.1f}")
     print("Data sent to Adafruit IO. Waiting for next reading...\n")
