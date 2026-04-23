@@ -11,6 +11,7 @@ import adafruit_requests
 import adafruit_connection_manager
 from time import time, sleep
 import os
+import ssl
 import busio
 import board
 import digitalio
@@ -23,16 +24,19 @@ led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
 # ── Config ────────────────────────────────────────────
-WIFI_SSID     = "YOUR_SSID"
-WIFI_PASSWORD = "YOUR_PASSWORD"
 
 AIO_USERNAME  = os.getenv("AIO_USERNAME")
 AIO_KEY       = os.getenv("AIO_KEY")
 AIO_URL       = f"https://io.adafruit.com/api/v2/{AIO_USERNAME}/feeds"
 
 SEALEVELPRESSURE_HPA = 1013.25
-# ──────────────────────────────────────────────────────
 
+# OpenWeather API Configuration
+CITY = "Redondo Beach"
+COUNTRY_CODE = "US"
+UNITS = "metric" # 'metric' for hPa
+API_URL = f"http://api.openweathermap.org/data/2.5/weather?q={CITY},{COUNTRY_CODE}&appid={os.getenv('OPENWEATHER_TOKEN')}&units={UNITS}"
+# ──────────────────────────────────────────────────────
 # Connect to WiFi
 print("Connecting to WiFi...")
 wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
@@ -43,6 +47,9 @@ print("Connected! IP:", wifi.radio.ipv4_address)
 pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
 ssl_context = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
 https = adafruit_requests.Session(pool, ssl_context)
+
+requests = adafruit_requests.Session(pool, ssl.create_default_context())
+
 
 headers = {
     "X-AIO-Key": AIO_KEY,
@@ -72,23 +79,38 @@ def read_data(sensorType):
             hum = sensor.relative_humidity
             pres = sensor.pressure * 0.02953 # converted to inches Hg
             alt = sensor.altitude
-            #altitude = sensor.altitude 
-            # Feed that data into ENS160 for compensation
-            #air_quality_sensor.temperature_compensation = temp
-            #air_quality_sensor.humidity_compensation = hum
             resistance = sensor.gas  # Get the gas resistance value from the BME680
                         
-
             return temp, hum, pres, resistance, alt, 0 #, eCO2, TVOC, AQI need to be calculated based on the gas resistance and compensation values, which requires additional code to implement the ENS160 algorithm. For now, we will return 0 for these values as placeholders.
-
-
     except Exception as e:
         print(f"Error reading sensor: {e}")
         
     return 0,0,0,0,0,0
 
+def get_sea_level_pressure():
+    print(f"Fetching weather for {CITY}...")
+    global last_SL_pressure
+    try:
+        response = requests.get(API_URL)
+        data = response.json()
+        
+        # OpenWeather provides 'pressure' in the 'main' dictionary.
+        # By default, this is the pressure at sea level for that location.
+        #print(f"API Response: {data}")  # Debug print to see the full API response
+        last_SL_pressure =sea_level_pressure = data["main"]["pressure"]
+        
+        response.close()
+    except Exception as e:
+        print(f"Error fetching sea level pressure: {e}")
+        sea_level_pressure = last_SL_pressure 
+
+    return sea_level_pressure
+
 # ── Main loop ─────────────────────────────────────────
 global sensorType
+global last_SL_pressure 
+last_SL_pressure = SEALEVELPRESSURE_HPA  # Default sea level pressure in hPa
+
 sensorType = os.getenv("SENSOR_TYPE", "NONE").upper()  # Default to NONE if not set
 if sensorType != "NONE":
     i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
@@ -99,8 +121,14 @@ if sensorType == "BME280":
 if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp and humidity
     sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x77) 
     #sensor.sea_level_pressure = SEALEVELPRESSURE_HPA  # this nominal sealevel pressure is used to calculate altitude,
-    # you can adjust it to your local sea level pressure for more accurate altitude readings
-    sensor.sea_level_pressure = SEALEVELPRESSURE_HPA  # this nominal sealevel pressure is used to calculate altitude,
+                            # you can adjust it to your local sea level pressure for more accurate altitude readings
+                            # This will be different based on your location and weather conditions, so you may want to update it periodically for better accuracy. 
+                            # You can find the current sea level pressure for your location from a local weather station or online weather service.
+    pressure = get_sea_level_pressure()     # this nominal sealevel pressure is used to calculate altitude,
+    sensor.sea_level_pressure = pressure
+
+    print(f"Current Sea Level Pressure: {pressure} hPa")
+
 # The first reading can be inaccurate, so we take an initial reading and discard it
 temp, hum, pres, resistance, altitude,eCO2,  = read_data(sensorType=sensorType)    
 sleep(10)  # Short delay before starting the main loop
@@ -109,7 +137,7 @@ print("Logging started. Press Ctrl+C to stop.\n")
 while True:
 
     # Get the actual sensor readings
-
+    sensor.sea_level_pressure = get_sea_level_pressure()  # Update sea level pressure before each reading for better altitude accuracy  
     temp, hum, pres, resistance, alt, eCO2,  = read_data(sensorType=sensorType)    
     alt = alt * 3.28084 # convert to feet
     send_to_adafruit("temperature", f"{temp:.1f}")
@@ -124,8 +152,6 @@ while True:
         led.value = True
         sleep(ledTime)
         led.value = False
-        #X = sensor.altitude
-        #print(f"Altitude: {X:.2f} m")
         sleep(1)  # Wait for 1 second before the next flash, adjust as needed
 
 
