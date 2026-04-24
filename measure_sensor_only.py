@@ -73,8 +73,11 @@ def read_data(sensorType):
         if sensorType == "BME280":
             temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
             hum = sensor.humidity
+            pres = sensor.pressure 
+            alt = get_sea_level_pressure(False) - pres  # Calculate altitude based on current pressure and sea level pressure
+            alt= 0.6243 * alt # Convert to altitude in feet using the barometric formula, assuming a standard temperature lapse rate
             pres = sensor.pressure * 0.02953 # converted to inches Hg
-            return temp, hum, pres, 0 ,0 ,0
+            return temp, hum, pres, 0 ,alt ,0
 
         elif sensorType == "BME680":
             temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
@@ -103,7 +106,7 @@ def get_sea_level_pressure(first_run=False):
             print(f"Connection error: {e}")
             # Optional: Force a Wi-Fi reset here if it fails repeatedly
 
-        print(f"METAR Response: {metar_text}")  # Debug print to see the full METAR response
+        #print(f"METAR Response: {metar_text}")  # Debug print to see the full METAR response
         sea_level_pressure = get_pressure_robust(metar_text)
            
         print(f"Altimeter Setting:  {sea_level_pressure:.2f} hPa)")
