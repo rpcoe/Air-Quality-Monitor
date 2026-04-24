@@ -26,6 +26,10 @@ from adafruit_bme280 import basic as adafruit_bme280
 
 from adafruit_httpserver import Server, Request, Response, POST
 from adafruit_httpserver import ChunkedResponse
+#import adafruit_requests
+#import adafruit_connection_manager
+
+
 
 
 def update_RTC_from_NTP():
@@ -63,9 +67,10 @@ def update_RTC_from_NTP():
 def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
     print(f"New file created, writing header: {file_name}")
     with open(file_name, "w") as f:
-        f.write(" ,Time, Temp(degF), Humidity(%), Pressure(inHg)\n")
+        f.write("AIR QUALITY MONITOR LOG  {time_stamp}\n")
+        f.write(" Time, Temp(degF), Humidity(%), Pressure(inHg), Resistance(Ohms)\n")
 
-timeIncrement = 30  # Set the time increment in seconds for logging data. Adjust as needed, but remember that very short intervals may fill up the SD card quickly and may not be necessary for air quality monitoring.
+timeIncrement = 60  # Set the time increment in seconds for logging data. Adjust as needed, but remember that very short intervals may fill up the SD card quickly and may not be necessary for air quality monitoring.
 ledTime = .01       # time that the led is flashing each cycle
 
 led = digitalio.DigitalInOut(board.LED)
@@ -91,18 +96,22 @@ wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_P
 
 print(f"Connected! Visit http://{wifi.radio.ipv4_address}\n")
 
-pool = socketpool.SocketPool(wifi.radio)
-server = Server(pool, "/sd", debug=True)
-# We add a short timeout so poll() doesn't hang or crash if nothing is happening
-server.socket_timeout = 0.1
-server.start(str(wifi.radio.ipv4_address),port=80)
-
 # Connect to the card and mount the filesystem.
 spi = busio.SPI(board.GP18, board.GP19, board.GP16)  # SCK, MOSI, MISO
 cs = digitalio.DigitalInOut(board.GP17)  # CS pin for SD card
 sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
 storage.mount(vfs, "/sd")
+
+pool = socketpool.SocketPool(wifi.radio)
+server = Server(pool, "/sd", debug=True)
+# We add a short timeout so poll() doesn't hang or crash if nothing is happening
+server.socket_timeout = 0.1
+server.start(str(wifi.radio.ipv4_address),port=80)
+
+
+
+
 
 
 
@@ -116,8 +125,7 @@ now = rtc.RTC().datetime
 # Format the date as YYYY-MM-DD (e.g., 2026-04-09)
 date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
 current_day = now.tm_mday  # Set to current day to start logging to the correct file
-#date_string = "2026-04-03"  # Hardcoded for testing
-#current_day = 2  # Hardcoded for testing
+##date_string = "2026-04-03"  # Hardcoded for testing
 
 # Build the filename 
 filePrefix = os.getenv("FILE_PREFIX")   
@@ -165,7 +173,6 @@ def base(request: Request):
 # # We use a generator to read the file in chunks so we don't run out of limited RAM on the Pico
 # Note: this is a very basic implementation and does not include error handling for file not found or other issues. It also assumes the file is small enough to be read in chunks of 512 bytes without causing issues. 
 
-#@server.route("/download")
 @server.route("/download")
 def download_file(request: Request):
     global file_name # Ensure we are using the most recent filename
@@ -216,18 +223,22 @@ async def log_data():
         temp, hum, pres, resistance, eCO2, TVOC = read_data(sensorType=sensorType)  
         # Format the timestamp: YYYY-MM-DD HH:MM:SS 
         timestamp = f" {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
+        
         try:
             with open(file_name, "a") as f:
                 f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {eCO2}, {TVOC}\n")  #, {AQI}\n")
             print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg, Resistance: {resistance} ohms, eCO2: {eCO2} ppm, TVOC: {TVOC} ppb")  #AQI (1-5): {AQI}")
         except OSError as e:
             print(f"Error writing to SD card: {e}")
+            
+
         await asyncio.sleep(timeIncrement)
     
 async def run_server():
     """Task to handle browser requests."""
     #print("Server task started...")
     while True:
+        
         try:
             # poll() checks for incoming browser requests
             server.poll()
@@ -235,7 +246,7 @@ async def run_server():
             # This catches "Soft" errors like timeouts without stopping the script
             print(f"Server poll error: {e}") 
             pass
-
+        
         # Flash LED to show activity
         led.value = True
         sleep(ledTime)
