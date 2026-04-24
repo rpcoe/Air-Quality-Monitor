@@ -110,7 +110,7 @@ def get_sea_level_pressure(first_run=False):
         if first_run:
             sea_level_pressure = sea_level_pressure # Use the initial pressure reading as the starting point for sea level pressure
         else:
-            #sea_level_pressure = 0.95 * last_SL_pressure + 0.05 * sea_level_pressure # average the new reading with the last known sea level pressure to smooth out fluctuations
+            sea_level_pressure = 0.95 * last_SL_pressure + 0.05 * sea_level_pressure # average the new reading with the last known sea level pressure to smooth out fluctuations
             last_SL_pressure =sea_level_pressure # Update the last known sea level pressure with the new value
         
     except Exception as e:
@@ -161,7 +161,7 @@ if sensorType == "BME280":
     # if 0x76 does not work try 0x77 :)
     sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
 if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp and humidity
-    sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x77) 
+    sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x77, refresh_rate=1)
     #sensor.sea_level_pressure = SEALEVELPRESSURE_HPA  # this nominal sealevel pressure is used to calculate altitude,
                             # you can adjust it to your local sea level pressure for more accurate altitude readings
                             # This will be different based on your location and weather conditions, so you may want to update it periodically for better accuracy. 
