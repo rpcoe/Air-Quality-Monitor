@@ -110,13 +110,13 @@ def get_sea_level_pressure(first_run=False):
         if first_run:
             sea_level_pressure = sea_level_pressure # Use the initial pressure reading as the starting point for sea level pressure
         else:
-            sea_level_pressure = 0.95 * last_SL_pressure + 0.05 * sea_level_pressure #
+            #sea_level_pressure = 0.95 * last_SL_pressure + 0.05 * sea_level_pressure # average the new reading with the last known sea level pressure to smooth out fluctuations
             last_SL_pressure =sea_level_pressure # Update the last known sea level pressure with the new value
         
     except Exception as e:
         print(f"Error fetching sea level pressure: {e}")
         sea_level_pressure = last_SL_pressure 
-    print(f"Using Sea Level Pressure: {sea_level_pressure:.2f} hPa")
+    #print(f"Using Sea Level Pressure: {sea_level_pressure:.2f} hPa")
     return sea_level_pressure
 
 def get_pressure_robust(text):
@@ -132,7 +132,8 @@ def get_pressure_robust(text):
             if slp_str.isdigit():
                 val = int(slp_str)
                 # Logic: SLP130 -> 1013.0, SLP992 -> 999.2
-                hpa = (10000 + val) / 10 if val < 1000 else (9000 + val) / 10
+                if val < 500: hpa = (10000 + val) / 10 
+                if val > 500: hpa = (9000 + val) / 10
                 return hpa
 
         # 2. Fallback to Altimeter (A2992)
