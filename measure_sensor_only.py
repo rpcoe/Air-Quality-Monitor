@@ -6,6 +6,8 @@
 # at specified intervals, while also flashing an LED to indicate activity.
 
 
+import gc
+
 import wifi
 import adafruit_requests
 import adafruit_connection_manager
@@ -17,6 +19,7 @@ import board
 import digitalio
 import adafruit_bme680
 from adafruit_bme280 import basic as adafruit_bme280
+import re
 
 
 update_interval = 30  # seconds suggest 60 when online
@@ -31,14 +34,9 @@ AIO_URL       = f"https://io.adafruit.com/api/v2/{AIO_USERNAME}/feeds"
 
 SEALEVELPRESSURE_HPA = 1013.25
 
-# OpenWeather API Configuration
-CITY = "Redondo Beach"
-COUNTRY_CODE = "US"
-UNITS = "metric"  # 'metric' for hPa
-API_URL = f"http://api.openweathermap.org/data/2.5/weather?q={CITY},{COUNTRY_CODE}&appid={os.getenv('OPENWEATHER_TOKEN')}&units={UNITS}"
-            # Version 2.5 of the OpenWeather API is used here, which provides current weather data including sea level pressure.
-            # This version is deprecated but still functional. You can also use version 3.0 of the API, which may require adjustments to the URL and response parsing.
-            #   and also requires a credit card for the free tier, so version 2.5 is used here for simplicity and accessibility.
+# Metar configuration
+STATION = os.getenv('METAR_STATION')
+METAR_URL = URL = f"https://aviationweather.gov/api/data/metar?ids={STATION}"
 
 # ──────────────────────────────────────────────────────
 # Connect to WiFi
@@ -92,28 +90,63 @@ def read_data(sensorType):
     return 0,0,0,0,0,0
 
 def get_sea_level_pressure(first_run=False):
-    print(f"Fetching sea level pressure for {CITY}...")
+    print(f"Fetching sea level pressure for {STATION}...")
     global last_SL_pressure
     try:
-        response = requests.get(API_URL)
-        data = response.json()
-        #print (f"API Response: {data}")  # Debug print to see the full API response
-        # OpenWeather provides 'pressure' in the 'main' dictionary.
-        # By default, this is the pressure at sea level for that location.
-        # A change of 1 hPa corresponds to a change of 27 feet in altitude, so we can use this value directly for our sea level pressure.
+        gc.collect()  # Run garbage collection to free up memory before making the request
+        metar_text = None   # Clear previous METAR text to avoid confusion in case of request failure
+        try:
+            response = requests.get(URL, timeout=15)
+            metar_text = response.text
+            response.close()
+        except (RuntimeError, OSError) as e:
+            print(f"Connection error: {e}")
+            # Optional: Force a Wi-Fi reset here if it fails repeatedly
+
+        print(f"METAR Response: {metar_text}")  # Debug print to see the full METAR response
+        sea_level_pressure = get_pressure_robust(metar_text)
+           
+        print(f"Altimeter Setting:  {sea_level_pressure:.2f} hPa)")
         if first_run:
-            sea_level_pressure = data["main"]["pressure"]  # Use the initial pressure reading as the starting point for sea level pressure
+            sea_level_pressure = sea_level_pressure # Use the initial pressure reading as the starting point for sea level pressure
         else:
-            sea_level_pressure = 0.95 * last_SL_pressure + 0.05 * data["main"]["pressure"] #
+            sea_level_pressure = 0.95 * last_SL_pressure + 0.05 * sea_level_pressure #
             last_SL_pressure =sea_level_pressure # Update the last known sea level pressure with the new value
         
-        response.close()
     except Exception as e:
         print(f"Error fetching sea level pressure: {e}")
         sea_level_pressure = last_SL_pressure 
-
+    print(f"Using Sea Level Pressure: {sea_level_pressure:.2f} hPa")
     return sea_level_pressure
 
+def get_pressure_robust(text):
+    if text is None or "METAR" not in text:
+        return None
+
+    try:
+        # 1. Search for SLP (High Resolution)
+        if "SLP" in text:
+            idx = text.find("SLP")
+            # Extract the 3 digits after 'SLP'
+            slp_str = text[idx+3 : idx+6]
+            if slp_str.isdigit():
+                val = int(slp_str)
+                # Logic: SLP130 -> 1013.0, SLP992 -> 999.2
+                hpa = (10000 + val) / 10 if val < 1000 else (9000 + val) / 10
+                return hpa
+
+        # 2. Fallback to Altimeter (A2992)
+        if " A" in text: # Look for space then A to avoid other letters
+            idx = text.find(" A") + 1
+            alt_str = text[idx+1 : idx+5]
+            if alt_str.isdigit():
+                inhg = float(alt_str) / 100
+                return inhg * 33.8639
+                
+    except Exception as e:
+        print(f"Parsing error: {e}")
+        
+    return None
 # ── Main loop ─────────────────────────────────────────
 global sensorType
 global last_SL_pressure 
@@ -161,5 +194,4 @@ while True:
         sleep(ledTime)
         led.value = False
         sleep(1)  # Wait for 1 second before the next flash, adjust as needed
-
 
