@@ -74,8 +74,7 @@ def read_data(sensorType):
             temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
             hum = sensor.humidity
             pres = sensor.pressure 
-            alt = get_sea_level_pressure(False) - pres  # Calculate altitude based on current pressure and sea level pressure
-            alt= 0.6243 * alt # Convert to altitude in feet using the barometric formula, assuming a standard temperature lapse rate
+            alt = (get_sea_level_pressure(False) - pres) *8.33  # Calculate altitude based on current pressure and sea level pressure in meters
             pres = sensor.pressure * 0.02953 # converted to inches Hg
             return temp, hum, pres, 0 ,alt ,0
 
@@ -169,10 +168,9 @@ if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp an
                             # you can adjust it to your local sea level pressure for more accurate altitude readings
                             # This will be different based on your location and weather conditions, so you may want to update it periodically for better accuracy. 
                             # You can find the current sea level pressure for your location from a local weather station or online weather service.
-pressure = get_sea_level_pressure(False)     # this nominal sealevel pressure is used to calculate altitude,
-sensor.sea_level_pressure = pressure
-
-print(f"Current Sea Level Pressure: {pressure} hPa")
+    pressure = get_sea_level_pressure(False)     # this nominal sealevel pressure is used to calculate altitude,
+    sensor.sea_level_pressure = pressure
+    print(f"Current Sea Level Pressure: {pressure} hPa")
 
 # The first reading can be inaccurate, so we take an initial reading and discard it
 temp, hum, pres, resistance, altitude,eCO2,  = read_data(sensorType=sensorType)    
