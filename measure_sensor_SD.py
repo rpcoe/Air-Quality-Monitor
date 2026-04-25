@@ -22,7 +22,8 @@ from adafruit_bme280 import basic as adafruit_bme280
 import adafruit_sdcard
 import storage
 import re
-
+import adafruit_ntp
+import rtc
 
 update_interval = 30  # seconds suggest 60 when online
 led = digitalio.DigitalInOut(board.LED)
@@ -40,13 +41,35 @@ SEALEVELPRESSURE_HPA = 1013.25
 STATION = os.getenv('METAR_STATION')
 METAR_URL = URL = f"https://aviationweather.gov/api/data/metar?ids={STATION}"
 
+file_name = "/sd/" + os.getenv('FILE_PREFIX') + "_LOG" + ".csv"  # Global variable to hold the current file name for logging
+
 # ──────────────────────────────────────────────────────
 
 def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
+    with open(file_name, "w")  as writefile:
+        writefile.write("AIR QUALITY MONITOR LOG  \n")
+        writefile.write(" Time, Temp(degF), Humidity(%), Pressure(inHg), Resistance(Ohms), Altitude(ft), eCO2(ppm), \n")
+        writefile.close()
     print(f"New file created, writing header: {file_name}")
-    with open(file_name, "w") as f:
-        f.write("AIR QUALITY MONITOR LOG  {time_stamp}\n")
-        f.write(" Time, Temp(degF), Humidity(%), Pressure(inHg), Resistance(Ohms)\n")
+
+# Create the Network Time Protocol (NTP) object after WiFi is connected
+def update_RTC_from_NTP():
+    try:
+        print("Syncing time with internet...")
+        ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+        rtc.RTC().datetime = ntp.datetime 
+        print("Clock synchronized!")
+    except Exception as e:
+        if isinstance(e, OSError) and e.args[0] == 110:  # ETIMEDOUT
+            sleep(5)  # Wait a bit before trying again
+            print("NTP request timed out. Will try again.")
+            ntp = adafruit_ntp.NTP(pool, tz_offset=-7) # -7 for PDT
+            rtc.RTC().datetime = ntp.datetime
+        else:
+            print(f"Could not sync time: {e}")
+            print("Logging will proceed with default system time.")
+
+
 
 # Connect to WiFi
 print("Connecting to WiFi...")
@@ -68,6 +91,8 @@ https = adafruit_requests.Session(pool, ssl_context)
 
 requests = adafruit_requests.Session(pool, ssl.create_default_context())
 
+update_RTC_from_NTP()  # Sync the RTC with NTP time before starting the main loop
+        # TODO: Add a periodic NTP sync in the main loop to keep the RTC accurate over time, especially if the device will be running for extended periods without a reset.
 
 headers = {
     "X-AIO-Key": AIO_KEY,
@@ -92,7 +117,9 @@ def read_data(sensorType):
             pres = sensor.pressure 
             alt = (get_sea_level_pressure(False) - pres) *8.33  # Calculate altitude based on current pressure and sea level pressure in meters
             pres = sensor.pressure * 0.02953 # converted to inches Hg
-            return temp, hum, pres, 0 ,alt ,0
+            resistance = 0  # BME280 does not have a gas sensor, so we return 0 for resistance
+            
+            #return temp, hum, pres, 0 ,alt ,0
 
         elif sensorType == "BME680":
             temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
@@ -100,18 +127,21 @@ def read_data(sensorType):
             pres = sensor.pressure * 0.02953 # converted to inches Hg
             alt = sensor.altitude
             resistance = sensor.gas  # Get the gas resistance value from the BME680
-
-            try:
-                with open(file_name, "a") as f:
-                    f.write(f"{timestamp}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {eCO2}, {TVOC}\n")  #, {AQI}\n")
-                print(f"Logged at {timestamp}s, Temp: {temp:.1f}°F, Humidity: {hum:.1f}%, Pressure: {pres:.2f} inHg, Resistance: {resistance} ohms, eCO2: {eCO2} ppm, TVOC: {TVOC} ppb")  #AQI (1-5): {AQI}")
-            except OSError as e:
-                print(f"Error writing to SD card: {e}")            
-            return temp, hum, pres, resistance, alt, 0 #, eCO2, TVOC, AQI need to be calculated based on the gas resistance and compensation values, which requires additional code to implement the ENS160 algorithm. For now, we will return 0 for these values as placeholders.
     except Exception as e:
-        print(f"Error reading sensor: {e}")
-        
-    return 0,0,0,0,0,0
+            print(f"Error reading sensor: {e}")  
+            temp, hum, pres, resistance, alt = 0, 0, 0, 0, 0    
+        #return 0,0,0,0,0,0
+    return temp, hum, pres, resistance, alt, 0 #, eCO2, TVOC, AQI need to be calculated based on the gas resistance and compensation values, which requires additional code to implement the ENS160 algorithm. For now, we will return 0 for these values as placeholders.
+
+def write_data(temp, hum, pres, resistance, alt, eCO2):
+    now = rtc.RTC().datetime
+    now = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
+    try:
+        with open(file_name, "a") as f:
+            f.write(f"{now}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {alt:.0f},{eCO2}, \n")  
+        print(f"Logged at {now}s, {temp:.1f}, {hum:.1f},{pres:.2f}, {resistance}, {alt:.0f}, {eCO2}")  #AQI (1-5): {AQI}")
+    except OSError as e:
+        print(f"Error writing to SD card: {e}")    
 
 def get_sea_level_pressure(first_run=False):
     print(f"Fetching sea level pressure for {STATION}...")
@@ -196,6 +226,23 @@ if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp an
     sensor.sea_level_pressure = pressure
     print(f"Current Sea Level Pressure: {pressure} hPa")
 
+# Check if the file already exists to decide whether to write a header
+try:
+    os.stat(file_name)
+    print("File exists, appending data to:", file_name )
+        # Format the timestamp: YYYY-MM-DD HH:MM:SS
+    now = rtc.RTC().datetime
+    timestamp = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
+
+    with open(file_name, "a") as f:
+        f.write(f"RESTART:  {timestamp}  \n")
+except OSError:
+    startNewFile(file_name)  # This will create the file and write the header if it doesn't exist 
+
+
+
+
+
 # The first reading can be inaccurate, so we take an initial reading and discard it
 temp, hum, pres, resistance, altitude,eCO2,  = read_data(sensorType=sensorType)    
 sleep(10)  # Short delay before starting the main loop
@@ -204,14 +251,14 @@ print("Logging started. Press Ctrl+C to stop.\n")
 while True:
 
     # Get the actual sensor readings
-    sensor.sea_level_pressure = get_sea_level_pressure(False)  # Update sea level pressure before each reading for better altitude accuracy  
     temp, hum, pres, resistance, alt, eCO2,  = read_data(sensorType=sensorType)    
     alt = alt * 3.28084 # convert to feet
+    write_data(temp, hum, pres, resistance, alt, eCO2)  # This function will write the data to the SD card     
     send_to_adafruit("temperature", f"{temp:.1f}")
-    send_to_adafruit("humidity", f"{hum:.1f}")
+    send_to_adafruit("humidity", f"{hum:.0f}")
     send_to_adafruit("pressure", f"{pres:.2f}")
-    send_to_adafruit("resistance", f"{resistance:.1f}")
-    send_to_adafruit("altitude", f"{alt:.1f}")
+    send_to_adafruit("resistance", f"{resistance:.0f}")
+    send_to_adafruit("altitude", f"{alt:.0f}")
     print("Data sent to Adafruit IO. Waiting for next reading...\n")
 
 # Flash LED to show activity during the update interval
