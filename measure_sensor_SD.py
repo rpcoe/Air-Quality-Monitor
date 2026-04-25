@@ -102,12 +102,16 @@ headers = {
 def send_to_adafruit(feed_name, value):
     url = f"{AIO_URL}/{feed_name}/data"
     payload = f'{{"value": "{value}"}}'
+    gc.collect()  # Run garbage collection to free up memory before making the request
+    response = None   # Clear previous response text to avoid confusion in case of request failure
+
     try:
         response = https.post(url, headers=headers, data=payload)
         print(f"Sent {feed_name}={value} → {response.status_code}")
-        response.close()
+        #response.close()
     except Exception as e:
         print(f"Error sending {feed_name}:", e)
+    response.close()  # Ensure the response is closed to free up resources
 
 def read_data(sensorType):
     try:
@@ -253,7 +257,8 @@ while True:
     # Get the actual sensor readings
     temp, hum, pres, resistance, alt, eCO2,  = read_data(sensorType=sensorType)    
     alt = alt * 3.28084 # convert to feet
-    write_data(temp, hum, pres, resistance, alt, eCO2)  # This function will write the data to the SD card     
+    write_data(temp, hum, pres, resistance, alt, eCO2)  # This function will write the data to the SD card 
+
     send_to_adafruit("temperature", f"{temp:.1f}")
     send_to_adafruit("humidity", f"{hum:.0f}")
     send_to_adafruit("pressure", f"{pres:.2f}")
