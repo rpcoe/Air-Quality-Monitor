@@ -41,7 +41,8 @@ SEALEVELPRESSURE_HPA = 1013.25
 STATION = os.getenv('METAR_STATION')
 METAR_URL = URL = f"https://aviationweather.gov/api/data/metar?ids={STATION}"
 
-file_name = "/sd/" + os.getenv('FILE_PREFIX') + "_LOG" + ".csv"  # Global variable to hold the current file name for logging
+prefix = os.getenv('FILE_PREFIX', 'AQ0')  
+file_name = "/sd/" + prefix + "_LOG" + ".csv"  # Global variable to hold the current file name for logging
 
 # ──────────────────────────────────────────────────────
 
@@ -259,11 +260,11 @@ while True:
     alt = alt * 3.28084 # convert to feet
     write_data(temp, hum, pres, resistance, alt, eCO2)  # This function will write the data to the SD card 
 
-    send_to_adafruit("temperature", f"{temp:.1f}")
-    send_to_adafruit("humidity", f"{hum:.0f}")
-    send_to_adafruit("pressure", f"{pres:.2f}")
-    send_to_adafruit("resistance", f"{resistance:.0f}")
-    send_to_adafruit("altitude", f"{alt:.0f}")
+    send_to_adafruit(f"{prefix}-temperature", f"{temp:.1f}")
+    send_to_adafruit(f"{prefix}-humidity", f"{hum:.0f}")
+    send_to_adafruit(f"{prefix}-pressure", f"{pres:.2f}")
+    send_to_adafruit(f"{prefix}-resistance", f"{resistance:.0f}")
+    send_to_adafruit(f"{prefix}-altitude", f"{alt:.0f}")
     print("Data sent to Adafruit IO. Waiting for next reading...\n")
 
 # Flash LED to show activity during the update interval
