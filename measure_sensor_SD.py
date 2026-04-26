@@ -1,6 +1,6 @@
 # This code is designed to read data from either a BME280 or BME680
 # sensor and send the readings to Adafruit IO. 
-# It connects to WiFi, sets up an HTTPS session, 
+# It connects to WiFi, sets up an HTTP session, 
 # and defines functions to send data to Adafruit IO and read sensor data. 
 # The main loop continuously reads sensor data and sends it to Adafruit IO 
 # at specified intervals, while also flashing an LED to indicate activity.
@@ -25,7 +25,8 @@ import re
 import adafruit_ntp
 import rtc
 
-update_interval = 60  # seconds suggest 60 when online
+#print(dir(adafruit_connection_manager))
+update_interval = 30  # seconds suggest 60 when online
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
@@ -90,7 +91,7 @@ pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
 ssl_context = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
 https = adafruit_requests.Session(pool, ssl_context)
 
-requests = adafruit_requests.Session(pool, ssl.create_default_context())
+#requests = adafruit_requests.Session(pool, ssl.create_default_context())
 
 update_RTC_from_NTP()  # Sync the RTC with NTP time before starting the main loop
         # TODO: Add a periodic NTP sync in the main loop to keep the RTC accurate over time, especially if the device will be running for extended periods without a reset.
@@ -99,19 +100,6 @@ headers = {
     "X-AIO-Key": AIO_KEY,
     "Content-Type": "application/json"
 }
-
-def send_to_adafruit(feed_name, value):
-    url = f"{AIO_URL}/{feed_name}/data"
-    payload = f'{{"value": "{value}"}}'
-    gc.collect()  # Run garbage collection to free up memory before making the request
-    response = None   # Clear previous response text to avoid confusion in case of request failure
-
-    try:
-        response = https.post(url, headers=headers, data=payload)
-        print(f"Sent {feed_name}={value} → {response.status_code}")
-        response.close()  # Ensure the response is closed to free up resources
-    except Exception as e:
-        print(f"Error sending {feed_name}:", e)
 
 def read_data(sensorType):
     try:
@@ -147,6 +135,21 @@ def write_data(temp, hum, pres, resistance, alt, eCO2):
     except OSError as e:
         print(f"Error writing to SD card: {e}")    
 
+def send_to_adafruit(feed_name, value):
+    url = f"{AIO_URL}/{feed_name}/data"
+    payload = f'{{"value": "{value}"}}'
+    gc.collect()
+
+    try:
+        response = https.post(url, headers=headers, data=payload)
+        print(f"Sent {feed_name}={value} → {response.status_code}")
+        response.close()
+    except Exception as e:
+        print(f"Error sending {feed_name}:", e)
+    finally:
+        adafruit_connection_manager.connection_manager_close_all(pool)
+        gc.collect()
+
 def get_sea_level_pressure(first_run=False):
     print(f"Fetching sea level pressure for {STATION}...")
     global last_SL_pressure
@@ -154,7 +157,7 @@ def get_sea_level_pressure(first_run=False):
         gc.collect()  # Run garbage collection to free up memory before making the request
         metar_text = None   # Clear previous METAR text to avoid confusion in case of request failure
         try:
-            response = requests.get(URL, timeout=15)
+            response = https.get(URL, timeout=15)
             metar_text = response.text
             response.close()
         except (RuntimeError, OSError) as e:
@@ -265,7 +268,7 @@ while True:
     send_to_adafruit(f"{prefix}-altitude", f"{alt:.0f}")
     print("Data sent to Adafruit IO. Waiting for next reading...\n")
 
-# Flash LED to show activity during the update interval
+    # Flash LED to show activity during the update interval
     for i in range(update_interval):
         led.value = True
         sleep(ledTime)
