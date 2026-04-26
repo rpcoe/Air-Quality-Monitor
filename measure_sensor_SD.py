@@ -25,7 +25,7 @@ import re
 import adafruit_ntp
 import rtc
 
-update_interval = 30  # seconds suggest 60 when online
+update_interval = 60  # seconds suggest 60 when online
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
@@ -43,7 +43,7 @@ METAR_URL = URL = f"https://aviationweather.gov/api/data/metar?ids={STATION}"
 
 prefix = os.getenv('FILE_PREFIX', 'AQ0')  
 file_name = "/sd/" + prefix + "_LOG" + ".csv"  # Global variable to hold the current file name for logging
-
+last_SL_pressure = SEALEVELPRESSURE_HPA  # Initialize last known sea level pressure with the default value
 # ──────────────────────────────────────────────────────
 
 def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
@@ -109,10 +109,9 @@ def send_to_adafruit(feed_name, value):
     try:
         response = https.post(url, headers=headers, data=payload)
         print(f"Sent {feed_name}={value} → {response.status_code}")
-        #response.close()
+        response.close()  # Ensure the response is closed to free up resources
     except Exception as e:
         print(f"Error sending {feed_name}:", e)
-    response.close()  # Ensure the response is closed to free up resources
 
 def read_data(sensorType):
     try:
@@ -211,7 +210,6 @@ def get_pressure_robust(text):
 
 # ── Main loop ─────────────────────────────────────────
 global sensorType
-global last_SL_pressure 
 #last_SL_pressure = SEALEVELPRESSURE_HPA  # Default sea level pressure in hPa
 last_SL_pressure = get_sea_level_pressure(True)
 sensorType = os.getenv("SENSOR_TYPE", "NONE").upper()  # Default to NONE if not set
