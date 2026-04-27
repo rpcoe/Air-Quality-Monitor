@@ -26,7 +26,7 @@ import adafruit_ntp
 import rtc
 
 #print(dir(adafruit_connection_manager))
-update_interval = 30  # seconds suggest 60 when online
+update_interval = 60  # seconds suggest 60 when online
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
@@ -96,24 +96,44 @@ https = adafruit_requests.Session(pool, ssl_context)
 update_RTC_from_NTP()  # Sync the RTC with NTP time before starting the main loop
         # TODO: Add a periodic NTP sync in the main loop to keep the RTC accurate over time, especially if the device will be running for extended periods without a reset.
 
-headers = {
-    "X-AIO-Key": AIO_KEY,
-    "Content-Type": "application/json"
-}
+def read_data_smooth(sensorType):
+    # Initialize before the loop with first reading
+    slp = get_sea_level_pressure(False)  # Get the initial sea level pressure for altitude calculations
+    temp_s, hum_s, pres_s, res_s, alt_s, eCO2_s = read_data(sensorType,slp)
+    
+    # Implement a simple moving average smoothing out short-term fluctuations.
+    alpha = 0.1  # Smoothing factor, adjust between 0 and 1 (higher is less smooth but more responsive)
+   
+    for i in range(update_interval):
+        temp, hum, pres, resistance, alt, eCO2 = read_data(sensorType,slp)
+        temp_s = alpha * temp + (1 - alpha) * temp_s
+        hum_s  = alpha * hum  + (1 - alpha) * hum_s
+        pres_s = alpha * pres + (1 - alpha) * pres_s
+        res_s  = alpha * resistance + (1 - alpha) * res_s
+        alt_s  = alpha * alt  + (1 - alpha) * alt_s
+        #print(f"Smoothed Readings: Temp={temp_s:.1f}F, Hum={hum_s:.1f}%, Pres={pres_s:.2f}inHg, Res={res_s:.0f}Ω, Alt={alt_s:.2f} meters")
+        sleep(1)  # Adjust the sleep time as needed to balance responsiveness with smoothing  
+          # Flash LED to show activity during the update interval
+        led.value = True
+        sleep(ledTime)
+        led.value = False
 
-def read_data(sensorType):
+    return temp_s, hum_s, pres_s, res_s, alt_s, eCO2_s   
+
+def read_data(sensorType,pres):
     try:
         if sensorType == "BME280":
             temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
             hum = sensor.humidity
             pres = sensor.pressure 
-            alt = (get_sea_level_pressure(False) - pres) *8.33  # Calculate altitude based on current pressure and sea level pressure in meters
+            alt = (last_SL_pressure - pres) *8.33  # Calculate altitude based on current pressure and sea level pressure in meters
             pres = sensor.pressure * 0.02953 # converted to inches Hg
             resistance = 0  # BME280 does not have a gas sensor, so we return 0 for resistance
             
             #return temp, hum, pres, 0 ,alt ,0
 
         elif sensorType == "BME680":
+            sensor.sea_level_pressure = last_SL_pressure # this nominal sealevel pressure is used to calculate altitude,
             temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
             hum = sensor.relative_humidity
             pres = sensor.pressure * 0.02953 # converted to inches Hg
@@ -134,6 +154,11 @@ def write_data(temp, hum, pres, resistance, alt, eCO2):
         print(f"Logged at {now}s, {temp:.1f}, {hum:.1f},{pres:.2f}, {resistance}, {alt:.0f}, {eCO2}")  #AQI (1-5): {AQI}")
     except OSError as e:
         print(f"Error writing to SD card: {e}")    
+
+headers = {
+    "X-AIO-Key": AIO_KEY,
+    "Content-Type": "application/json"
+}
 
 def send_to_adafruit(feed_name, value):
     url = f"{AIO_URL}/{feed_name}/data"
@@ -167,13 +192,13 @@ def get_sea_level_pressure(first_run=False):
         #print(f"METAR Response: {metar_text}")  # Debug print to see the full METAR response
         sea_level_pressure = get_pressure_robust(metar_text)
            
-        print(f"Altimeter Setting:  {sea_level_pressure:.2f} hPa)")
+        #print(f"Altimeter Setting:  {sea_level_pressure:.2f} hPa)")
         if first_run:
             sea_level_pressure = sea_level_pressure # Use the initial pressure reading as the starting point for sea level pressure
         else:
             sea_level_pressure = 0.95 * last_SL_pressure + 0.05 * sea_level_pressure # average the new reading with the last known sea level pressure to smooth out fluctuations
             last_SL_pressure =sea_level_pressure # Update the last known sea level pressure with the new value
-        
+        print(f"Using Sea Level Pressure: {sea_level_pressure:.2f} hPa")    
     except Exception as e:
         print(f"Error fetching sea level pressure: {e}")
         sea_level_pressure = last_SL_pressure 
@@ -219,19 +244,10 @@ sensorType = os.getenv("SENSOR_TYPE", "NONE").upper()  # Default to NONE if not 
 if sensorType != "NONE":
     i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
 if sensorType == "BME280":
-    # address can change based on bme device
-    # if 0x76 does not work try 0x77 :)
     sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
 if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp and humidity
     sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x77, refresh_rate=1)
-    #sensor.sea_level_pressure = SEALEVELPRESSURE_HPA  # this nominal sealevel pressure is used to calculate altitude,
-                            # you can adjust it to your local sea level pressure for more accurate altitude readings
-                            # This will be different based on your location and weather conditions, so you may want to update it periodically for better accuracy. 
-                            # You can find the current sea level pressure for your location from a local weather station or online weather service.
-    pressure = get_sea_level_pressure(False)     # this nominal sealevel pressure is used to calculate altitude,
-    sensor.sea_level_pressure = pressure
-    print(f"Current Sea Level Pressure: {pressure} hPa")
-
+    
 # Check if the file already exists to decide whether to write a header
 try:
     os.stat(file_name)
@@ -250,14 +266,15 @@ except OSError:
 
 
 # The first reading can be inaccurate, so we take an initial reading and discard it
-temp, hum, pres, resistance, altitude,eCO2,  = read_data(sensorType=sensorType)    
+temp, hum, pres, resistance, altitude,eCO2,  = read_data(sensorType=sensorType,pres=last_SL_pressure)    
 sleep(10)  # Short delay before starting the main loop
 print("Logging started. Press Ctrl+C to stop.\n")
 
 while True:
+    #last_SL_pressure = get_sea_level_pressure(False)  # Update sea level pressure before each reading to improve altitude accuracy
 
     # Get the actual sensor readings
-    temp, hum, pres, resistance, alt, eCO2,  = read_data(sensorType=sensorType)    
+    temp, hum, pres, resistance, alt, eCO2,  = read_data_smooth(sensorType=sensorType)    
     alt = alt * 3.28084 # convert to feet
     write_data(temp, hum, pres, resistance, alt, eCO2)  # This function will write the data to the SD card 
 
@@ -268,10 +285,5 @@ while True:
     send_to_adafruit(f"{prefix}-altitude", f"{alt:.0f}")
     print("Data sent to Adafruit IO. Waiting for next reading...\n")
 
-    # Flash LED to show activity during the update interval
-    for i in range(update_interval):
-        led.value = True
-        sleep(ledTime)
-        led.value = False
-        sleep(1)  # Wait for 1 second before the next flash, adjust as needed
+    
 
