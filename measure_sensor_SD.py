@@ -30,6 +30,7 @@ update_interval = 60  # seconds suggest 60 when online
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
+sdExists = True
 # ── Config ────────────────────────────────────────────
 
 AIO_USERNAME  = os.getenv("AIO_USERNAME")
@@ -48,6 +49,9 @@ last_SL_pressure = SEALEVELPRESSURE_HPA  # Initialize last known sea level press
 # ──────────────────────────────────────────────────────
 
 def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
+    if sdExists == False:
+        print("SD card not found. Cannot create log file.")
+        return
     with open(file_name, "w")  as writefile:
         writefile.write("AIR QUALITY MONITOR LOG  \n")
         writefile.write(" Time, Temp(degF), Humidity(%), Pressure(inHg), Resistance(Ohms), Altitude(ft), eCO2(ppm), \n")
@@ -82,10 +86,14 @@ print("Connected! IP:", wifi.radio.ipv4_address)
 # Connect to the card and mount the filesystem.
 spi = busio.SPI(board.GP18, board.GP19, board.GP16)  # SCK, MOSI, MISO
 cs = digitalio.DigitalInOut(board.GP17)  # CS pin for SD card
-sdcard = adafruit_sdcard.SDCard(spi, cs)
-vfs = storage.VfsFat(sdcard)
-storage.mount(vfs, "/sd")
+try:
 
+    sdcard = adafruit_sdcard.SDCard(spi, cs)
+    vfs = storage.VfsFat(sdcard)
+    storage.mount(vfs, "/sd")
+except Exception as e:
+    print(f"Error mounting SD card: {e}")
+    sdExists = False
 # Set up HTTPS session
 pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
 ssl_context = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
@@ -276,7 +284,8 @@ while True:
     # Get the actual sensor readings
     temp, hum, pres, resistance, alt, eCO2,  = read_data_smooth(sensorType=sensorType)    
     alt = alt * 3.28084 # convert to feet
-    write_data(temp, hum, pres, resistance, alt, eCO2)  # This function will write the data to the SD card 
+    if sdExists == True:
+        write_data(temp, hum, pres, resistance, alt, eCO2)  # This function will write the data to the SD card 
 
     send_to_adafruit(f"{prefix}-temperature", f"{temp:.1f}")
     send_to_adafruit(f"{prefix}-humidity", f"{hum:.0f}")
