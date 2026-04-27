@@ -17,6 +17,7 @@ import ssl
 import busio
 import board
 import digitalio
+import ipaddress
 import adafruit_bme680
 from adafruit_bme280 import basic as adafruit_bme280
 import adafruit_sdcard
@@ -26,7 +27,7 @@ import adafruit_ntp
 import rtc
 
 #print(dir(adafruit_connection_manager))
-update_interval = 60  # seconds suggest 60 when online
+update_interval = 250  # seconds suggest 250 when online - has to be less than 300 to guarantee one update per 5 minute cycle, can be set lower for more frequent updates if desired 
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
@@ -79,6 +80,21 @@ def update_RTC_from_NTP():
 
 # Connect to WiFi
 print("Connecting to WiFi...")
+#  set static IP address to avoid issues with changing IPs and to make it easier to access the web interface. Make sure the IP address you choose is outside the range of addresses your router assigns via DHCP to avoid conflicts. You can check your router's settings to see the DHCP range and choose an IP address that is not in that range. For example, if your router assigns addresses from
+# Retrieve strings from settings.toml
+if DHCP_ENABLE := os.getenv("DHCP_ENABLE", "true").lower() == "true":
+    print("DHCP is enabled. Connecting with dynamic IP address.")
+else:
+    ipv4 = os.getenv("IP_ADDRESS")   #ipaddress.IPv4Address("os.getenv('IP_ADDRESS')")
+    gateway = os.getenv("MY_GATEWAY")
+    netmask = os.getenv("MY_NETMASK")
+    ipv4 = ipaddress.IPv4Address(ipv4)  # Convert the string to an IPv4Address object
+    netmask = ipaddress.IPv4Address(netmask)  #netmask = ipaddress.IPv4Address("255.255.255.0")
+    gateway = ipaddress.IPv4Address(gateway)    #("192.168.254.254")  #("192.168.254.254")
+    wifi.radio.set_ipv4_address(ipv4=ipv4, netmask=netmask, gateway=gateway)
+
+    print(f"Using IP address: {ipv4}  gateway: {gateway}  netmask: {netmask}")
+
 wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
 
 print("Connected! IP:", wifi.radio.ipv4_address)
