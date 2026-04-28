@@ -47,6 +47,7 @@ METAR_URL = URL = f"https://aviationweather.gov/api/data/metar?ids={STATION}"
 prefix = os.getenv('FILE_PREFIX', 'AQ0')  
 file_name = "/sd/" + prefix + "_LOG" + ".csv"  # Global variable to hold the current file name for logging
 last_SL_pressure = SEALEVELPRESSURE_HPA  # Initialize last known sea level pressure with the default value
+gas_baseline = float(os.getenv("GAS_BASELINE", "200000"))  # This is a baseline resistance value for the gas sensor, adjust based on your environment and sensor calibration
 # ──────────────────────────────────────────────────────
 
 def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
@@ -55,7 +56,7 @@ def startNewFile(file_name):  # This will create the file and write the header i
         return
     with open(file_name, "w")  as writefile:
         writefile.write("AIR QUALITY MONITOR LOG  \n")
-        writefile.write(" Time, Temp(degF), Humidity(%), Pressure(inHg), Resistance(Ohms), Altitude(ft), eCO2(ppm), \n")
+        writefile.write(" Time, Temp(degF), Humidity(%), Pressure(inHg), AQI, Altitude(ft), Resistance(Ohms),\n")
         writefile.close()
     print(f"New file created, writing header: {file_name}")
 
@@ -120,21 +121,35 @@ https = adafruit_requests.Session(pool, ssl_context)
 update_RTC_from_NTP()  # Sync the RTC with NTP time before starting the main loop
         # TODO: Add a periodic NTP sync in the main loop to keep the RTC accurate over time, especially if the device will be running for extended periods without a reset.
 
+def calculate_aqi(gas, humidity):
+    hum_weight = 0.25
+    gas_weight = 0.75
+    
+    # Humidity offset (ideal is 40%)
+    hum_score = (100 - humidity) / (100 - 40) * (hum_weight * 100)
+    
+    # Gas score (this needs a rolling baseline of your highest seen resistance)
+    gas_score = (gas / gas_baseline) * (gas_weight * 100)
+    
+    return hum_score + gas_score # Scale of 0-100 (Higher is better)
+
+
 def read_data_smooth(sensorType):
     # Initialize before the loop with first reading
     slp = get_sea_level_pressure(False)  # Get the initial sea level pressure for altitude calculations
-    temp_s, hum_s, pres_s, res_s, alt_s, eCO2_s = read_data(sensorType,slp)
+    temp_s, hum_s, pres_s, res_s, alt_s, aqi_s = read_data(sensorType,slp)
     
     # Implement a simple moving average smoothing out short-term fluctuations.
-    alpha = 0.1  # Smoothing factor, adjust between 0 and 1 (higher is less smooth but more responsive)
+    alpha = 0.02  # Smoothing factor, adjust between 0 and 1 (higher is less smooth but more responsive)
    
     for i in range(update_interval):
-        temp, hum, pres, resistance, alt, eCO2 = read_data(sensorType,slp)
+        temp, hum, pres, resistance, alt, aqi = read_data(sensorType,slp)
         temp_s = alpha * temp + (1 - alpha) * temp_s
         hum_s  = alpha * hum  + (1 - alpha) * hum_s
         pres_s = alpha * pres + (1 - alpha) * pres_s
         res_s  = alpha * resistance + (1 - alpha) * res_s
         alt_s  = alpha * alt  + (1 - alpha) * alt_s
+        aqi_s  = alpha * aqi  + (1 - alpha) * aqi_s
         #print(f"Smoothed Readings: Temp={temp_s:.1f}F, Hum={hum_s:.1f}%, Pres={pres_s:.2f}inHg, Res={res_s:.0f}Ω, Alt={alt_s:.2f} meters")
         sleep(1)  # Adjust the sleep time as needed to balance responsiveness with smoothing  
           # Flash LED to show activity during the update interval
@@ -142,7 +157,7 @@ def read_data_smooth(sensorType):
         sleep(ledTime)
         led.value = False
 
-    return temp_s, hum_s, pres_s, res_s, alt_s, eCO2_s   
+    return temp_s, hum_s, pres_s, res_s, alt_s, aqi_s   
 
 def read_data(sensorType,pres):
     try:
@@ -153,7 +168,7 @@ def read_data(sensorType,pres):
             alt = (last_SL_pressure - pres) *8.33  # Calculate altitude based on current pressure and sea level pressure in meters
             pres = sensor.pressure * 0.02953 # converted to inches Hg
             resistance = 0  # BME280 does not have a gas sensor, so we return 0 for resistance
-            
+            aqi = 0  # AQI cannot be calculated without gas resistance, so we return 0 for AQI  
             #return temp, hum, pres, 0 ,alt ,0
 
         elif sensorType == "BME680":
@@ -163,19 +178,21 @@ def read_data(sensorType,pres):
             pres = sensor.pressure * 0.02953 # converted to inches Hg
             alt = sensor.altitude
             resistance = sensor.gas  # Get the gas resistance value from the BME680
+            aqi = calculate_aqi(resistance, hum)  # Calculate the AQI based on gas resistance and humidity
     except Exception as e:
             print(f"Error reading sensor: {e}")  
-            temp, hum, pres, resistance, alt = 0, 0, 0, 0, 0    
+            temp, hum, pres, resistance, alt, aqi = 0, 0, 0, 0, 0, 0
         #return 0,0,0,0,0,0
-    return temp, hum, pres, resistance, alt, 0 #, eCO2, TVOC, AQI need to be calculated based on the gas resistance and compensation values, which requires additional code to implement the ENS160 algorithm. For now, we will return 0 for these values as placeholders.
+    return temp, hum, pres, resistance, alt, aqi
 
-def write_data(temp, hum, pres, resistance, alt, eCO2):
+
+def write_data(temp, hum, pres, resistance, alt, aqi):
     now = rtc.RTC().datetime
     now = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
     try:
         with open(file_name, "a") as f:
-            f.write(f"{now}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {alt:.0f},{eCO2}, \n")  
-        print(f"Logged at {now}s, {temp:.1f}, {hum:.1f},{pres:.2f}, {resistance}, {alt:.0f}, {eCO2}")  #AQI (1-5): {AQI}")
+            f.write(f"{now}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {alt:.0f},{aqi}, \n")  
+        print(f"Logged at {now}s, {temp:.1f}, {hum:.1f},{pres:.2f}, {resistance}, {alt:.0f}, {aqi}")  #AQI (1-5): {AQI}")
     except OSError as e:
         print(f"Error writing to SD card: {e}")    
 
@@ -290,7 +307,7 @@ except OSError:
 
 
 # The first reading can be inaccurate, so we take an initial reading and discard it
-temp, hum, pres, resistance, altitude,eCO2,  = read_data(sensorType=sensorType,pres=last_SL_pressure)    
+temp, hum, pres, altitude, eCO2, resistance = read_data(sensorType=sensorType,pres=last_SL_pressure)    
 sleep(10)  # Short delay before starting the main loop
 print("Logging started. Press Ctrl+C to stop.\n")
 
@@ -298,16 +315,17 @@ while True:
     #last_SL_pressure = get_sea_level_pressure(False)  # Update sea level pressure before each reading to improve altitude accuracy
 
     # Get the actual sensor readings
-    temp, hum, pres, resistance, alt, eCO2,  = read_data_smooth(sensorType=sensorType)    
+    temp, hum, pres, resistance, alt, aqi,  = read_data_smooth(sensorType=sensorType)    
     alt = alt * 3.28084 # convert to feet
     if sdExists == True:
-        write_data(temp, hum, pres, resistance, alt, eCO2)  # This function will write the data to the SD card 
+        write_data(temp, hum, pres, alt, aqi, resistance)  # This function will write the data to the SD card 
 
     send_to_adafruit(f"{prefix}-temperature", f"{temp:.1f}")
     send_to_adafruit(f"{prefix}-humidity", f"{hum:.0f}")
     send_to_adafruit(f"{prefix}-pressure", f"{pres:.2f}")
-    send_to_adafruit(f"{prefix}-resistance", f"{resistance:.0f}")
     send_to_adafruit(f"{prefix}-altitude", f"{alt:.0f}")
+    send_to_adafruit(f"{prefix}-airquality", f"{aqi:.0f}")
+
     print("Data sent to Adafruit IO. Waiting for next reading...\n")
 
     
