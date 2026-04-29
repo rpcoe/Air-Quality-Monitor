@@ -48,6 +48,7 @@ prefix = os.getenv('FILE_PREFIX', 'AQ0')
 file_name = "/sd/" + prefix + "_LOG" + ".csv"  # Global variable to hold the current file name for logging
 last_SL_pressure = SEALEVELPRESSURE_HPA  # Initialize last known sea level pressure with the default value
 gas_baseline = float(os.getenv("GAS_BASELINE", "200000"))  # This is a baseline resistance value for the gas sensor, adjust based on your environment and sensor calibration
+sendAdafruit = os.getenv("SEND_TO_ADAFRUIT", "false").lower() == "true"  # Set to True to enable sending data to Adafruit IO, False to disable
 # ──────────────────────────────────────────────────────
 
 def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
@@ -186,13 +187,13 @@ def read_data(sensorType,pres):
     return temp, hum, pres, resistance, alt, aqi
 
 
-def write_data(temp, hum, pres, resistance, alt, aqi):
+def write_data(temp, hum, pres, alt, aqi , resistance):
     now = rtc.RTC().datetime
     now = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
     try:
         with open(file_name, "a") as f:
-            f.write(f"{now}, {temp:.1f}, {hum:.1f}, {pres:.2f}, {resistance}, {alt:.0f},{aqi}, \n")  
-        print(f"Logged at {now}s, {temp:.1f}, {hum:.1f},{pres:.2f}, {resistance}, {alt:.0f}, {aqi}")  #AQI (1-5): {AQI}")
+            f.write(f"{now}, {temp:.1f}, {hum:.1f}, {pres:.2f},  {alt:.0f},{aqi},{resistance}, \n")  
+        print(f"Logged at {now}s, {temp:.1f}, {hum:.1f}, {pres:.2f}, {alt:.0f}, {aqi}, {resistance}")  #AQI (1-5): {AQI}")
     except OSError as e:
         print(f"Error writing to SD card: {e}")    
 
@@ -312,21 +313,20 @@ sleep(10)  # Short delay before starting the main loop
 print("Logging started. Press Ctrl+C to stop.\n")
 
 while True:
-    #last_SL_pressure = get_sea_level_pressure(False)  # Update sea level pressure before each reading to improve altitude accuracy
-
-    # Get the actual sensor readings
+        # Get the actual sensor readings
     temp, hum, pres, resistance, alt, aqi,  = read_data_smooth(sensorType=sensorType)    
     alt = alt * 3.28084 # convert to feet
     if sdExists == True:
         write_data(temp, hum, pres, alt, aqi, resistance)  # This function will write the data to the SD card 
 
-    send_to_adafruit(f"{prefix}-temperature", f"{temp:.1f}")
-    send_to_adafruit(f"{prefix}-humidity", f"{hum:.0f}")
-    send_to_adafruit(f"{prefix}-pressure", f"{pres:.2f}")
-    send_to_adafruit(f"{prefix}-altitude", f"{alt:.0f}")
-    send_to_adafruit(f"{prefix}-airquality", f"{aqi:.0f}")
+    if sendAdafruit:
+        send_to_adafruit(f"{prefix}-temperature", f"{temp:.1f}")
+        send_to_adafruit(f"{prefix}-humidity", f"{hum:.0f}")
+        send_to_adafruit(f"{prefix}-pressure", f"{pres:.2f}")
+        send_to_adafruit(f"{prefix}-altitude", f"{alt:.0f}")
+        send_to_adafruit(f"{prefix}-airquality", f"{aqi:.0f}")
 
-    print("Data sent to Adafruit IO. Waiting for next reading...\n")
+        print("Data sent to Adafruit IO. Waiting for next reading...\n")
 
     
 
