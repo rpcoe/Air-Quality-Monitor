@@ -27,7 +27,7 @@ import adafruit_ntp
 import rtc
 
 #print(dir(adafruit_connection_manager))
-update_interval = 20  # seconds suggest 250 when online - has to be less than 300 to guarantee one update per 5 minute cycle, can be set lower for more frequent updates if desired 
+update_interval = 15  # seconds suggest 240 when online - has to be less than 250 to guarantee one update per 5 minute cycle, can be set lower for more frequent updates if desired 
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
@@ -122,16 +122,27 @@ https = adafruit_requests.Session(pool, ssl_context)
 update_RTC_from_NTP()  # Sync the RTC with NTP time before starting the main loop
         # TODO: Add a periodic NTP sync in the main loop to keep the RTC accurate over time, especially if the device will be running for extended periods without a reset.
 
-def calculate_aqi(gas, humidity):
-    hum_weight = 0.25
+def calculate_aqi(gas, hum):
+    hum_weighting = 0.25
     gas_weight = 0.75
+    hum_baseline = 40   
     
     # Humidity offset (ideal is 40%)
-    hum_score = (100 - humidity) / (100 - 40) * (hum_weight * 100)
-    
-    # Gas score (this needs a rolling baseline of your highest seen resistance)
-    gas_score = (gas / gas_baseline) * (gas_weight * 100)
-    
+    #hum_score = (100 - humidity) / (100 - 40) * (hum_weight * 100)
+    gas_offset = gas_baseline-gas
+    hum_offset = hum - hum_baseline
+    # Score humidity
+    if hum_offset > 0:
+        hum_score = (100 - hum_baseline - hum_offset) / (100 - hum_baseline) * (hum_weighting * 100)
+    else:
+        hum_score = (hum_baseline + hum_offset) / hum_baseline * (hum_weighting * 100)
+
+    # Score gas
+    if gas_offset > 0:
+        gas_score = (gas / gas_baseline) * (100 - hum_weighting * 100)
+    else:
+        gas_score = (100 - hum_weighting) * 100
+          
     return hum_score + gas_score # Scale of 0-100 (Higher is better)
 
 
@@ -321,8 +332,8 @@ while True:
 
     if sendAdafruit:
         prefx = prefix  # Use the prefix from settings.toml to determine which Adafruit IO feed to send to
-        if prefix == os.getenv('FILE_PREFIX', 'aq0'): 
-            prefx = "aq2" #os.getenv('ALT_PREFIX', 'aq2')  # Prefix for Adafruit IO feed names, can be set in settings.toml
+        if prefix == "aq3": 
+            prefx = os.getenv('ALT_PREFIX', 'aq2')  # Prefix for Adafruit IO feed names, can be set in settings.toml
             pres = -pres  # Invert pressure for AQ3 to code that data is for an alternate feed
         send_to_adafruit(f"{prefx}-temperature", f"{temp:.1f}")
         send_to_adafruit(f"{prefx}-humidity", f"{hum:.0f}")
