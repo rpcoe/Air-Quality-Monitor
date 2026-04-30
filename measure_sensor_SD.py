@@ -27,7 +27,7 @@ import adafruit_ntp
 import rtc
 
 #print(dir(adafruit_connection_manager))
-update_interval = 15  # seconds suggest 240 when online - has to be less than 250 to guarantee one update per 5 minute cycle, can be set lower for more frequent updates if desired 
+update_interval = 240  # seconds suggest 240 when online - has to be less than 250 to guarantee one update per 5 minute cycle, can be set lower for more frequent updates if desired 
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
@@ -128,7 +128,6 @@ def calculate_aqi(gas, hum):
     hum_baseline = 40   
     
     # Humidity offset (ideal is 40%)
-    #hum_score = (100 - humidity) / (100 - 40) * (hum_weight * 100)
     gas_offset = gas_baseline-gas
     hum_offset = hum - hum_baseline
     # Score humidity
@@ -193,8 +192,10 @@ def read_data(sensorType,pres):
             aqi = calculate_aqi(resistance, hum)  # Calculate the AQI based on gas resistance and humidity
     except Exception as e:
             print(f"Error reading sensor: {e}")  
-            temp, hum, pres, resistance, alt, aqi = 0, 0, 0, 0, 0, 0
-        #return 0,0,0,0,0,0
+            #temp, hum, pres, resistance, alt, aqi = 0, 0, 0, 0, 0, 0
+            return 0, 0, 0, 0, 0, 0
+    temp = temp + float(os.getenv('TEMP_CALIB', 0))  
+    alt = alt + float(os.getenv('ALT_CALIB', 0))
     return temp, hum, pres, resistance, alt, aqi
 
 
