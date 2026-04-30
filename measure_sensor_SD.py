@@ -27,7 +27,7 @@ import adafruit_ntp
 import rtc
 
 #print(dir(adafruit_connection_manager))
-update_interval = 250  # seconds suggest 250 when online - has to be less than 300 to guarantee one update per 5 minute cycle, can be set lower for more frequent updates if desired 
+update_interval = 20  # seconds suggest 250 when online - has to be less than 300 to guarantee one update per 5 minute cycle, can be set lower for more frequent updates if desired 
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
@@ -192,8 +192,8 @@ def write_data(temp, hum, pres, alt, aqi , resistance):
     now = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
     try:
         with open(file_name, "a") as f:
-            f.write(f"{now}, {temp:.1f}, {hum:.1f}, {pres:.2f},  {alt:.0f},{aqi},{resistance}, \n")  
-        print(f"Logged at {now}s, {temp:.1f}, {hum:.1f}, {pres:.2f}, {alt:.0f}, {aqi}, {resistance}")  #AQI (1-5): {AQI}")
+            f.write(f"{now}, {temp:.1f}, {hum:.1f}, {pres:.2f},  {alt:.0f},{aqi:.0f},{resistance:.0f}, \n")  
+        print(f"Logged at {now}s, {temp:.1f}, {hum:.1f}, {pres:.2f}, {alt:.0f}, {aqi:.0f}, {resistance:.0f}")  #AQI (1-5): {AQI}")
     except OSError as e:
         print(f"Error writing to SD card: {e}")    
 
@@ -320,11 +320,15 @@ while True:
         write_data(temp, hum, pres, alt, aqi, resistance)  # This function will write the data to the SD card 
 
     if sendAdafruit:
-        send_to_adafruit(f"{prefix}-temperature", f"{temp:.1f}")
-        send_to_adafruit(f"{prefix}-humidity", f"{hum:.0f}")
-        send_to_adafruit(f"{prefix}-pressure", f"{pres:.2f}")
-        send_to_adafruit(f"{prefix}-altitude", f"{alt:.0f}")
-        send_to_adafruit(f"{prefix}-airquality", f"{aqi:.0f}")
+        prefx = prefix  # Use the prefix from settings.toml to determine which Adafruit IO feed to send to
+        if prefix == os.getenv('FILE_PREFIX', 'aq0'): 
+            prefx = "aq2" #os.getenv('ALT_PREFIX', 'aq2')  # Prefix for Adafruit IO feed names, can be set in settings.toml
+            pres = -pres  # Invert pressure for AQ3 to code that data is for an alternate feed
+        send_to_adafruit(f"{prefx}-temperature", f"{temp:.1f}")
+        send_to_adafruit(f"{prefx}-humidity", f"{hum:.0f}")
+        send_to_adafruit(f"{prefx}-pressure", f"{pres:.2f}")
+        send_to_adafruit(f"{prefx}-altitude", f"{alt:.0f}")
+        send_to_adafruit(f"{prefx}-airquality", f"{aqi:.0f}")
 
         print("Data sent to Adafruit IO. Waiting for next reading...\n")
 
