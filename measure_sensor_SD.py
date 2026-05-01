@@ -294,6 +294,7 @@ def get_pressure_robust(text):
 global sensorType
 #last_SL_pressure = SEALEVELPRESSURE_HPA  # Default sea level pressure in hPa
 last_SL_pressure = get_sea_level_pressure(True)
+count = 0  # Counter to track when to update RTC and sea level pressure
 sensorType = os.getenv("SENSOR_TYPE", "NONE").upper()  # Default to NONE if not set
 if sensorType != "NONE":
     i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
@@ -328,6 +329,12 @@ while True:
         # Get the actual sensor readings
     temp, hum, pres, resistance, alt, aqi,  = read_data_smooth(sensorType=sensorType)    
     alt = alt * 3.28084 # convert to feet
+
+    if count > 3600/update_interval:  # Update RTC everyhour to account for internal clock drift
+            update_RTC_from_NTP()  # Sync time every hour to keep the RTC accurate
+            count = 0  # Reset the counter after updating sea level pressure
+    count += 1  
+
     if sdExists == True:
         write_data(temp, hum, pres, alt, aqi, resistance)  # This function will write the data to the SD card 
 
@@ -336,6 +343,7 @@ while True:
         if prefix == "aq3": 
             prefx = os.getenv('ALT_PREFIX', 'aq2')  # Prefix for Adafruit IO feed names, can be set in settings.toml
             pres = -pres  # Invert pressure for AQ3 to code that data is for an alternate feed
+        
         send_to_adafruit(f"{prefx}-temperature", f"{temp:.1f}")
         send_to_adafruit(f"{prefx}-humidity", f"{hum:.0f}")
         send_to_adafruit(f"{prefx}-pressure", f"{pres:.2f}")
