@@ -16,28 +16,21 @@ sdcard = adafruit_sdcard.SDCard(spi, cs)
 vfs = storage.VfsFat(sdcard)
 
 storage.mount(vfs, "/sd")
-now = rtc.RTC().datetime
-date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
-#date_string = "2026-04-07"  # Hardcoded for testing
 
-# Build the filename 
-filePrefix = os.getenv("FILE_PREFIX")   
-file_name = f"/sd/{filePrefix}_{date_string}.txt"
-#file_name = f"/sd/AQ1_{date_string}.txt"
+filePrefix = os.getenv("FILE_PREFIX") 
+file_name = f"/sd/{filePrefix}_LOG.csv"  # Global variable to hold the current file name for logging
 
 while True:
     print("\nfile_name:", file_name)
-
 
     with open(file_name, "r") as inputfile:      
         for line in inputfile:
             print(line)
         inputfile.close    
-    #sleep(1)  # Need to input a new index # to read a different file
-    print("Enter a new file date to display: YYYY-MM-DD")
-    date_input = input()
-    file_name = f"/sd/{filePrefix}_{date_input}.txt"
-    print("File changed to: ", file_name)
+
+    #print("Finished  -  Run again? (press Enter to continue, or Ctrl+C to stop)")
+    input = input()
+
     sleep(3)  # Sleep to allow time for the file to be read before the next input
 
 print("stopped")
