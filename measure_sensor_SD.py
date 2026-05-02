@@ -117,14 +117,11 @@ pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
 ssl_context = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
 https = adafruit_requests.Session(pool, ssl_context)
 
-#requests = adafruit_requests.Session(pool, ssl.create_default_context())
-
 update_RTC_from_NTP()  # Sync the RTC with NTP time before starting the main loop
-        # TODO: Add a periodic NTP sync in the main loop to keep the RTC accurate over time, especially if the device will be running for extended periods without a reset.
 
 def calculate_aqi(gas, hum):
-    hum_weighting = 0.25
-    gas_weight = 0.75
+    hum_weighting = 25
+    gas_weight = 100-hum_weighting
     hum_baseline = 40   
     
     # Humidity offset (ideal is 40%)
@@ -132,17 +129,17 @@ def calculate_aqi(gas, hum):
     hum_offset = hum - hum_baseline
     # Score humidity
     if hum_offset > 0:
-        hum_score = (100 - hum_baseline - hum_offset) / (100 - hum_baseline) * (hum_weighting * 100)
-    else:
-        hum_score = (hum_baseline + hum_offset) / hum_baseline * (hum_weighting * 100)
+        #hum_score = (100 - hum_baseline - hum_offset) / (100 - hum_baseline) * (hum_weighting )
+        hum_score = ((100 - hum) / (100 - hum_baseline)) * (hum_weighting)
 
-    # Score gas
-    if gas_offset > 0:
-        gas_score = (gas / gas_baseline) * (100 - hum_weighting * 100)
     else:
-        gas_score = (100 - hum_weighting) * 100
-          
-    return hum_score + gas_score # Scale of 0-100 (Higher is better)
+        hum_score = ((hum) / hum_baseline) * (hum_weighting )
+
+    # Score gas  
+    gas_score = (gas / gas_baseline) * (gas_weight )
+    iaq_score = gas_score + hum_score
+            
+    return min(max(iaq_score, 0), 500)  # clamp to 0–500
 
 
 def read_data_smooth(sensorType):
@@ -177,10 +174,9 @@ def read_data(sensorType,pres):
             hum = sensor.humidity
             pres = sensor.pressure 
             alt = (last_SL_pressure - pres) *8.33  # Calculate altitude based on current pressure and sea level pressure in meters
-            pres = sensor.pressure * 0.02953 # converted to inches Hg
+            pres = pres * 0.02953 # converted to inches Hg
             resistance = 0  # BME280 does not have a gas sensor, so we return 0 for resistance
             aqi = 0  # AQI cannot be calculated without gas resistance, so we return 0 for AQI  
-            #return temp, hum, pres, 0 ,alt ,0
 
         elif sensorType == "BME680":
             sensor.sea_level_pressure = last_SL_pressure # this nominal sealevel pressure is used to calculate altitude,
@@ -292,8 +288,8 @@ def get_pressure_robust(text):
 
 # ── Main loop ─────────────────────────────────────────
 global sensorType
-#last_SL_pressure = SEALEVELPRESSURE_HPA  # Default sea level pressure in hPa
 last_SL_pressure = get_sea_level_pressure(True)
+count = 0  # Counter to track when to update RTC and sea level pressure
 sensorType = os.getenv("SENSOR_TYPE", "NONE").upper()  # Default to NONE if not set
 if sensorType != "NONE":
     i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
@@ -316,9 +312,6 @@ except OSError:
     startNewFile(file_name)  # This will create the file and write the header if it doesn't exist 
 
 
-
-
-
 # The first reading can be inaccurate, so we take an initial reading and discard it
 temp, hum, pres, altitude, eCO2, resistance = read_data(sensorType=sensorType,pres=last_SL_pressure)    
 sleep(10)  # Short delay before starting the main loop
@@ -328,6 +321,12 @@ while True:
         # Get the actual sensor readings
     temp, hum, pres, resistance, alt, aqi,  = read_data_smooth(sensorType=sensorType)    
     alt = alt * 3.28084 # convert to feet
+
+    if count > 3600/update_interval:  # Update RTC everyhour to account for internal clock drift
+            update_RTC_from_NTP()  # Sync time every hour to keep the RTC accurate
+            count = 0  # Reset the counter after updating sea level pressure
+    count += 1  
+
     if sdExists == True:
         write_data(temp, hum, pres, alt, aqi, resistance)  # This function will write the data to the SD card 
 
@@ -336,6 +335,7 @@ while True:
         if prefix == "aq3": 
             prefx = os.getenv('ALT_PREFIX', 'aq2')  # Prefix for Adafruit IO feed names, can be set in settings.toml
             pres = -pres  # Invert pressure for AQ3 to code that data is for an alternate feed
+        
         send_to_adafruit(f"{prefx}-temperature", f"{temp:.1f}")
         send_to_adafruit(f"{prefx}-humidity", f"{hum:.0f}")
         send_to_adafruit(f"{prefx}-pressure", f"{pres:.2f}")
