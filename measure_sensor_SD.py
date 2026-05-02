@@ -117,14 +117,11 @@ pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
 ssl_context = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
 https = adafruit_requests.Session(pool, ssl_context)
 
-#requests = adafruit_requests.Session(pool, ssl.create_default_context())
-
 update_RTC_from_NTP()  # Sync the RTC with NTP time before starting the main loop
-        # TODO: Add a periodic NTP sync in the main loop to keep the RTC accurate over time, especially if the device will be running for extended periods without a reset.
 
 def calculate_aqi(gas, hum):
-    hum_weighting = 0.25
-    gas_weight = 0.75
+    hum_weighting = 25
+    gas_weight = 100-hum_weighting
     hum_baseline = 40   
     
     # Humidity offset (ideal is 40%)
@@ -132,17 +129,17 @@ def calculate_aqi(gas, hum):
     hum_offset = hum - hum_baseline
     # Score humidity
     if hum_offset > 0:
-        hum_score = (100 - hum_baseline - hum_offset) / (100 - hum_baseline) * (hum_weighting * 100)
-    else:
-        hum_score = (hum_baseline + hum_offset) / hum_baseline * (hum_weighting * 100)
+        #hum_score = (100 - hum_baseline - hum_offset) / (100 - hum_baseline) * (hum_weighting )
+        hum_score = ((100 - hum) / (100 - hum_baseline)) * (hum_weighting)
 
-    # Score gas
-    if gas_offset > 0:
-        gas_score = (gas / gas_baseline) * (100 - hum_weighting * 100)
     else:
-        gas_score = (100 - hum_weighting) * 100
-          
-    return hum_score + gas_score # Scale of 0-100 (Higher is better)
+        hum_score = ((hum) / hum_baseline) * (hum_weighting )
+
+    # Score gas  
+    gas_score = (gas / gas_baseline) * (gas_weight )
+    iaq_score = gas_score + hum_score
+            
+    return min(max(iaq_score, 0), 500)  # clamp to 0–500
 
 
 def read_data_smooth(sensorType):
@@ -177,10 +174,9 @@ def read_data(sensorType,pres):
             hum = sensor.humidity
             pres = sensor.pressure 
             alt = (last_SL_pressure - pres) *8.33  # Calculate altitude based on current pressure and sea level pressure in meters
-            pres = sensor.pressure * 0.02953 # converted to inches Hg
+            pres = pres * 0.02953 # converted to inches Hg
             resistance = 0  # BME280 does not have a gas sensor, so we return 0 for resistance
             aqi = 0  # AQI cannot be calculated without gas resistance, so we return 0 for AQI  
-            #return temp, hum, pres, 0 ,alt ,0
 
         elif sensorType == "BME680":
             sensor.sea_level_pressure = last_SL_pressure # this nominal sealevel pressure is used to calculate altitude,
@@ -292,7 +288,6 @@ def get_pressure_robust(text):
 
 # ── Main loop ─────────────────────────────────────────
 global sensorType
-#last_SL_pressure = SEALEVELPRESSURE_HPA  # Default sea level pressure in hPa
 last_SL_pressure = get_sea_level_pressure(True)
 count = 0  # Counter to track when to update RTC and sea level pressure
 sensorType = os.getenv("SENSOR_TYPE", "NONE").upper()  # Default to NONE if not set
@@ -315,9 +310,6 @@ try:
         f.write(f"RESTART:  {timestamp}  \n")
 except OSError:
     startNewFile(file_name)  # This will create the file and write the header if it doesn't exist 
-
-
-
 
 
 # The first reading can be inaccurate, so we take an initial reading and discard it
