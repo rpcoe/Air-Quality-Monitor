@@ -20,6 +20,8 @@ import digitalio
 import ipaddress
 import adafruit_bme680
 from adafruit_bme280 import basic as adafruit_bme280
+#import adafruit_bh1750
+import adafruit_veml7700
 import adafruit_sdcard
 import storage
 import re
@@ -112,6 +114,7 @@ try:
 except Exception as e:
     print(f"Error mounting SD card: {e}")
     sdExists = False
+
 # Set up HTTPS session
 pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
 ssl_context = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
@@ -168,30 +171,37 @@ def read_data_smooth(sensorType):
     return temp_s, hum_s, pres_s, res_s, alt_s, aqi_s   
 
 def read_data(sensorType,pres):
+    tempCalib = float(os.getenv('TEMP_CALIB', 0))
+    altCalib = float(os.getenv('ALT_CALIB', 0))
     try:
         if sensorType == "BME280":
-            temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
+            temp = sensor.temperature * 9 / 5 + 32  + tempCalib  # Convert to Fahrenheit and apply calibration
             hum = sensor.humidity
             pres = sensor.pressure 
-            alt = (last_SL_pressure - pres) *8.33  # Calculate altitude based on current pressure and sea level pressure in meters
+            alt = (last_SL_pressure - pres) *8.33  + altCalib # Calculate altitude based on current pressure and sea level pressure in meters
             pres = pres * 0.02953 # converted to inches Hg
             resistance = 0  # BME280 does not have a gas sensor, so we return 0 for resistance
             aqi = 0  # AQI cannot be calculated without gas resistance, so we return 0 for AQI  
 
-        elif sensorType == "BME680":
+        if sensorType == "BME680":
             sensor.sea_level_pressure = last_SL_pressure # this nominal sealevel pressure is used to calculate altitude,
-            temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
+            temp = sensor.temperature * 9 / 5 + 32 + tempCalib  # Convert to Fahrenheit and apply calibration
             hum = sensor.relative_humidity
             pres = sensor.pressure * 0.02953 # converted to inches Hg
-            alt = sensor.altitude
+            alt = sensor.altitude + altCalib # Add altitude calibration from settings.toml
             resistance = sensor.gas  # Get the gas resistance value from the BME680
             aqi = calculate_aqi(resistance, hum)  # Calculate the AQI based on gas resistance and humidity
+        if sensorType == "VEML7700":
+            temp = 0  # VEML7700 does not measure temperature, so we return 0 for temp
+            hum = 0   # VEML7700 does not measure humidity, so we return 0 for humidity
+            pres = sensor.lux # VEML7700 does not measure pressure, so we are using this feed temporarily.
+            alt = 0   # Altitude cannot be calculated without pressure, so we return 0 for altitude
+            resistance = 0  # VEML7700 does not have a gas sensor, so we return 0 for resistance
+            aqi = 0   # VEML7700 does not have a gas sensor, so we return 0 for AQI
     except Exception as e:
             print(f"Error reading sensor: {e}")  
             #temp, hum, pres, resistance, alt, aqi = 0, 0, 0, 0, 0, 0
             return 0, 0, 0, 0, 0, 0
-    temp = temp + float(os.getenv('TEMP_CALIB', 0))  
-    alt = alt + float(os.getenv('ALT_CALIB', 0))
     return temp, hum, pres, resistance, alt, aqi
 
 
@@ -291,13 +301,21 @@ global sensorType
 last_SL_pressure = get_sea_level_pressure(True)
 count = 0  # Counter to track when to update RTC and sea level pressure
 sensorType = os.getenv("SENSOR_TYPE", "NONE").upper()  # Default to NONE if not set
-if sensorType != "NONE":
-    i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
-if sensorType == "BME280":
-    sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
-if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp and humidity
-    sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x77, refresh_rate=1)
-    
+try:
+    if sensorType != "NONE":
+        i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
+        sleep(1)  # Short delay to ensure I2C bus is ready
+    if sensorType == "BME280":
+        sensor = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
+    if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp and humidity
+        sensor = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x77, refresh_rate=1)
+    #if sensorType == "BH1750":
+        #sensor = adafruit_bh1750.BH1750(i2c, address=0x23)
+    if sensorType == "VEML7700":
+        sensor = adafruit_veml7700.VEML7700(i2c)
+except:
+    print("No valid sensor type specified. Please set SENSOR_TYPE in settings.toml to BME280, BME680, or VEML7700.")
+
 # Check if the file already exists to decide whether to write a header
 try:
     os.stat(file_name)
