@@ -1,5 +1,5 @@
-# This code is designed to read data from either a BME280 or BME680
-# sensor and send the readings to Adafruit IO. 
+# This code is designed to read data from either a BME280, BME680, or VEML7700 sensor, log the data to an SD card,
+# and optionally send the readings to Adafruit IO. 
 # It connects to WiFi, sets up an HTTP session, 
 # and defines functions to send data to Adafruit IO and read sensor data. 
 # The main loop continuously reads sensor data and sends it to Adafruit IO 
@@ -20,7 +20,6 @@ import digitalio
 import ipaddress
 import adafruit_bme680
 from adafruit_bme280 import basic as adafruit_bme280
-#import adafruit_bh1750
 import adafruit_veml7700
 import adafruit_sdcard
 import storage
@@ -29,7 +28,7 @@ import adafruit_ntp
 import rtc
 
 #print(dir(adafruit_connection_manager))
-update_interval = 240  # seconds suggest 240 when online - has to be less than 250 to guarantee one update per 5 minute cycle, can be set lower for more frequent updates if desired 
+update_interval = 10  # seconds suggest 240 when online - has to be less than 250 to guarantee one update per 5 minute cycle, can be set lower for more frequent updates if desired 
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
@@ -59,7 +58,7 @@ def startNewFile(file_name):  # This will create the file and write the header i
         return
     with open(file_name, "w")  as writefile:
         writefile.write("AIR QUALITY MONITOR LOG  \n")
-        writefile.write(" Time, Temp(degF), Humidity(%), Pressure(inHg), AQI, Altitude(ft), Resistance(Ohms),\n")
+        writefile.write(" Time, Temp(degF), Humidity(%), Pressure(inHg), AQI, Altitude(ft), Resistance(Ohms), Light(Lux)\n")
         writefile.close()
     print(f"New file created, writing header: {file_name}")
 
@@ -148,27 +147,28 @@ def calculate_aqi(gas, hum):
 def read_data_smooth(sensorType):
     # Initialize before the loop with first reading
     slp = get_sea_level_pressure(False)  # Get the initial sea level pressure for altitude calculations
-    temp_s, hum_s, pres_s, res_s, alt_s, aqi_s = read_data(sensorType,slp)
+    temp_s, hum_s, pres_s, res_s, alt_s, aqi_s, light_s = read_data(sensorType,slp)
     
     # Implement a simple moving average smoothing out short-term fluctuations.
     alpha = 0.02  # Smoothing factor, adjust between 0 and 1 (higher is less smooth but more responsive)
    
     for i in range(update_interval):
-        temp, hum, pres, resistance, alt, aqi = read_data(sensorType,slp)
+        temp, hum, pres, resistance, alt, aqi, light = read_data(sensorType,slp)
         temp_s = alpha * temp + (1 - alpha) * temp_s
         hum_s  = alpha * hum  + (1 - alpha) * hum_s
         pres_s = alpha * pres + (1 - alpha) * pres_s
         res_s  = alpha * resistance + (1 - alpha) * res_s
         alt_s  = alpha * alt  + (1 - alpha) * alt_s
         aqi_s  = alpha * aqi  + (1 - alpha) * aqi_s
-        #print(f"Smoothed Readings: Temp={temp_s:.1f}F, Hum={hum_s:.1f}%, Pres={pres_s:.2f}inHg, Res={res_s:.0f}Ω, Alt={alt_s:.2f} meters")
+        light_s = alpha * light + (1 - alpha) * light_s
+        #print(f"Smoothed Readings: Temp={temp_s:.1f}F, Hum={hum_s:.1f}%, Pres={pres_s:.2f}inHg, Res={res_s:.0f}Ω, Alt={alt_s:.2f} meters, AQI={aqi_s:.0f}, Light={light_s:.2f} lux")
         sleep(1)  # Adjust the sleep time as needed to balance responsiveness with smoothing  
           # Flash LED to show activity during the update interval
         led.value = True
         sleep(ledTime)
         led.value = False
 
-    return temp_s, hum_s, pres_s, res_s, alt_s, aqi_s   
+    return temp_s, hum_s, pres_s, res_s, alt_s, aqi_s, light_s   
 
 def read_data(sensorType,pres):
     tempCalib = float(os.getenv('TEMP_CALIB', 0))
@@ -182,7 +182,7 @@ def read_data(sensorType,pres):
             pres = pres * 0.02953 # converted to inches Hg
             resistance = 0  # BME280 does not have a gas sensor, so we return 0 for resistance
             aqi = 0  # AQI cannot be calculated without gas resistance, so we return 0 for AQI  
-
+            light = 0  # BME280 does not have a light sensor, so we return 0 for light level
         if sensorType == "BME680":
             sensor.sea_level_pressure = last_SL_pressure # this nominal sealevel pressure is used to calculate altitude,
             temp = sensor.temperature * 9 / 5 + 32 + tempCalib  # Convert to Fahrenheit and apply calibration
@@ -191,27 +191,29 @@ def read_data(sensorType,pres):
             alt = sensor.altitude + altCalib # Add altitude calibration from settings.toml
             resistance = sensor.gas  # Get the gas resistance value from the BME680
             aqi = calculate_aqi(resistance, hum)  # Calculate the AQI based on gas resistance and humidity
+            light = 0  # BME680 does not have a light sensor, so we return 0 for light level
         if sensorType == "VEML7700":
             temp = 0  # VEML7700 does not measure temperature, so we return 0 for temp
             hum = 0   # VEML7700 does not measure humidity, so we return 0 for humidity
-            pres = sensor.lux # VEML7700 does not measure pressure, so we are using this feed temporarily.
+            pres = 0 # VEML7700 does not measure pressure, so we are using this feed temporarily.
             alt = 0   # Altitude cannot be calculated without pressure, so we return 0 for altitude
             resistance = 0  # VEML7700 does not have a gas sensor, so we return 0 for resistance
             aqi = 0   # VEML7700 does not have a gas sensor, so we return 0 for AQI
+            light = sensor.lux  # Get the light level in lux from the VEML7700
     except Exception as e:
             print(f"Error reading sensor: {e}")  
-            #temp, hum, pres, resistance, alt, aqi = 0, 0, 0, 0, 0, 0
-            return 0, 0, 0, 0, 0, 0
-    return temp, hum, pres, resistance, alt, aqi
+            #temp, hum, pres, resistance, alt, aqi = 0, 0, 0, 0, 0, 0, 0
+            return 0, 0, 0, 0, 0, 0, 0
+    return temp, hum, pres, resistance, alt, aqi, light
 
 
-def write_data(temp, hum, pres, alt, aqi , resistance):
+def write_data(temp, hum, pres, alt, aqi , resistance, light):
     now = rtc.RTC().datetime
     now = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} {now.tm_hour:02d}:{now.tm_min:02d}:{now.tm_sec:02d}"
     try:
         with open(file_name, "a") as f:
-            f.write(f"{now}, {temp:.1f}, {hum:.1f}, {pres:.2f},  {alt:.0f},{aqi:.0f},{resistance:.0f}, \n")  
-        print(f"Logged at {now}s, {temp:.1f}, {hum:.1f}, {pres:.2f}, {alt:.0f}, {aqi:.0f}, {resistance:.0f}")  #AQI (1-5): {AQI}")
+            f.write(f"{now}, {temp:.1f}, {hum:.1f}, {pres:.2f},  {alt:.0f},{aqi:.0f},{resistance:.0f},{light:.0f} \n")  
+        print(f"Logged at {now}s, {temp:.1f}, {hum:.1f}, {pres:.2f}, {alt:.0f}, {aqi:.0f}, {resistance:.0f},{light:.0f}")  #AQI (1-5): {AQI}")
     except OSError as e:
         print(f"Error writing to SD card: {e}")    
 
@@ -331,13 +333,13 @@ except OSError:
 
 
 # The first reading can be inaccurate, so we take an initial reading and discard it
-temp, hum, pres, altitude, eCO2, resistance = read_data(sensorType=sensorType,pres=last_SL_pressure)    
+temp, hum, pres, altitude, eCO2, resistance, light = read_data(sensorType=sensorType,pres=last_SL_pressure)    
 sleep(10)  # Short delay before starting the main loop
 print("Logging started. Press Ctrl+C to stop.\n")
 
 while True:
         # Get the actual sensor readings
-    temp, hum, pres, resistance, alt, aqi,  = read_data_smooth(sensorType=sensorType)    
+    temp, hum, pres, resistance, alt, aqi, light = read_data_smooth(sensorType=sensorType)    
     alt = alt * 3.28084 # convert to feet
 
     if count > 3600/update_interval:  # Update RTC everyhour to account for internal clock drift
@@ -346,17 +348,17 @@ while True:
     count += 1  
 
     if sdExists == True:
-        write_data(temp, hum, pres, alt, aqi, resistance)  # This function will write the data to the SD card 
+        write_data(temp, hum, pres, alt, aqi, resistance, light)  # This function will write the data to the SD card 
 
     if sendAdafruit:
         prefx = prefix  # Use the prefix from settings.toml to determine which Adafruit IO feed to send to
         if prefix == "aq3": 
             prefx = os.getenv('ALT_PREFIX', 'aq2')  # Prefix for Adafruit IO feed names, can be set in settings.toml
-            pres = -pres  # Invert pressure for AQ3 to code that data is for an alternate feed
+            light = -light  # Invert pressure for AQ3 to code that data is for an alternate feed
         
         send_to_adafruit(f"{prefx}-temperature", f"{temp:.1f}")
         send_to_adafruit(f"{prefx}-humidity", f"{hum:.0f}")
-        send_to_adafruit(f"{prefx}-pressure", f"{pres:.2f}")
+        send_to_adafruit(f"{prefx}-light", f"{light:.2f}")
         send_to_adafruit(f"{prefx}-altitude", f"{alt:.0f}")
         send_to_adafruit(f"{prefx}-airquality", f"{aqi:.0f}")
 
