@@ -28,7 +28,7 @@ import adafruit_ntp
 import rtc
 
 #print(dir(adafruit_connection_manager))
-update_interval = 10  # seconds suggest 240 when online - has to be less than 250 to guarantee one update per 5 minute cycle, can be set lower for more frequent updates if desired 
+update_interval = 240  # seconds suggest 240 when online - has to be less than 250 to guarantee one update per 5 minute cycle, can be set lower for more frequent updates if desired 
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
@@ -358,7 +358,7 @@ while True:
         
         send_to_adafruit(f"{prefx}-temperature", f"{temp:.1f}")
         send_to_adafruit(f"{prefx}-humidity", f"{hum:.0f}")
-        send_to_adafruit(f"{prefx}-light", f"{light:.2f}")
+        send_to_adafruit(f"{prefx}-light", f"{light:.0f}")
         send_to_adafruit(f"{prefx}-altitude", f"{alt:.0f}")
         send_to_adafruit(f"{prefx}-airquality", f"{aqi:.0f}")
 
