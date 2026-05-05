@@ -1,0 +1,33 @@
+const AIO_USERNAME = "robcoe1500";
+const AIO_KEY      = "...................";
+
+function pullFromAdafruitIO() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+
+  // Add header row if sheet is empty
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(["                AIR MONITOR 1  "])
+    sheet.appendRow(["Timestamp", "Temperature F", "Humidity %", "Altitude ft", "Air Quality Index", "Light (Lux)" ]);
+  }
+
+  var temp     = getFeedValue("aq1-temperature");
+  var humidity = getFeedValue("aq1-humidity");
+  var light = getFeedValue("aq1-light");
+  var altitude = getFeedValue("aq1-altitude");
+  var airqual  = getFeedValue("aq1-airquality");
+
+  sheet.appendRow([new Date(), temp, humidity, altitude, airqual, light]);
+  Logger.log(`Logged → Temp: ${temp}, Humidity: ${humidity}, Altitude: ${altitude}, AirQuality: ${airqual}, Light: ${light} `);
+}
+
+function getFeedValue(feedName) {
+  var url = `https://io.adafruit.com/api/v2/${AIO_USERNAME}/feeds/${feedName}/data/last`;
+  var options = {
+    headers: { "X-AIO-Key": AIO_KEY },
+    muteHttpExceptions: true,
+    fetchTimeoutSeconds: 120
+  };
+  var response = UrlFetchApp.fetch(url, options );
+  var data     = JSON.parse(response.getContentText());
+  return data.value;
+}
