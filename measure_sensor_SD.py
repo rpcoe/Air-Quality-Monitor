@@ -351,16 +351,12 @@ while True:
         write_data(temp, hum, pres, alt, aqi, resistance, light)  # This function will write the data to the SD card 
 
     if sendAdafruit:
-        prefx = prefix  # Use the prefix from settings.toml to determine which Adafruit IO feed to send to
-        if prefix == "aq3": 
-            prefx = os.getenv('ALT_PREFIX', 'aq2')  # Prefix for Adafruit IO feed names, can be set in settings.toml
-            light = -light  # Invert pressure for AQ3 to code that data is for an alternate feed
-        
-        send_to_adafruit(f"{prefx}-temperature", f"{temp:.1f}")
-        send_to_adafruit(f"{prefx}-humidity", f"{hum:.0f}")
-        send_to_adafruit(f"{prefx}-light", f"{light:.0f}")
-        send_to_adafruit(f"{prefx}-altitude", f"{alt:.0f}")
-        send_to_adafruit(f"{prefx}-airquality", f"{aqi:.0f}")
+         # Use the prefix from settings.toml to determine which Adafruit IO feed to send to
+        send_to_adafruit(f"{prefix}-temperature", f"{temp:.1f}")
+        send_to_adafruit(f"{prefix}-humidity", f"{hum:.0f}")
+        send_to_adafruit(f"{prefix}-light", f"{light:.0f}")
+        send_to_adafruit(f"{prefix}-altitude", f"{alt:.0f}")
+        send_to_adafruit(f"{prefix}-airquality", f"{aqi:.0f}")
 
         print("Data sent to Adafruit IO. Waiting for next reading...\n")
 
