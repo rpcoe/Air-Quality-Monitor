@@ -11,6 +11,7 @@ import os
 import ipaddress
 import gc
 import wifi
+import ssl
 import socketpool
 import asyncio
 import busio
@@ -26,6 +27,7 @@ import adafruit_connection_manager
 import rtc
 
 from adafruit_bme280 import basic as adafruit_bme280
+import adafruit_veml7700  
 
 from adafruit_httpserver import Server, Request, Response, POST
 from adafruit_httpserver import ChunkedResponse
@@ -41,6 +43,12 @@ SEALEVELPRESSURE_HPA = 1013.25
 # Metar configuration
 STATION = os.getenv('METAR_STATION')
 METAR_URL = URL = f"https://aviationweather.gov/api/data/metar?ids={STATION}"
+
+headers = {
+    "X-AIO-Key": AIO_KEY,
+    "Content-Type": "application/json"
+}
+
 
 # Create the Network Time Protocol (NTP) object after WiFi is connected so we can sync the RTC with accurate time from the internet. This is important for accurate timestamps in our log files, especially if the device is running for a long time and may experience clock drift. We will also call this function at the start of each new day to ensure the RTC stays accurate over time.
 def update_RTC_from_NTP():
@@ -153,38 +161,6 @@ def read_data_smooth(sensorType):
         led.value = False
 
     return temp_s, hum_s, pres_s, res_s, alt_s, aqi_s, light_s   
-"""
-def read_data(sensorType):
-    try:
-        if sensorType == "BME280":
-            temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
-            hum = sensor.humidity
-            pres = sensor.pressure * 0.02953 # converted to inches Hg
-            return temp, hum, pres, 0 ,0 ,0
-
-        elif sensorType == "BME680":
-            temp = sensor.temperature * 9 / 5 + 32  # Convert to Fahrenheit
-            hum = sensor.relative_humidity
-            pres = sensor.pressure * 0.02953 # converted to inches Hg
-            #altitude = sensor.altitude 
-            # Feed that data into ENS160 for compensation
-            #air_quality_sensor.temperature_compensation = temp
-            #air_quality_sensor.humidity_compensation = hum
-            resistance = sensor.gas  # Get the gas resistance value from the BME680
-            #eCO2 = air_quality_sensor.eCO2
-            #TVOC = air_quality_sensor.TVOC  
-            #AQI = air_quality_sensor.AQI  
-            
-            #print(f"eCO2: {eCO2} ppm, TVOC: {TVOC} ppb, AQI (1-5): {AQI}")
-
-            return temp, hum, pres, resistance, 0, 0 #, eCO2, TVOC, AQI need to be calculated based on the gas resistance and compensation values, which requires additional code to implement the ENS160 algorithm. For now, we will return 0 for these values as placeholders.
-
-
-    except Exception as e:
-        print(f"Error reading sensor: {e}")
-        
-    return 0,0,0,0,0,0
-"""
 
 def write_data(temp, hum, pres, alt, aqi , resistance, light):
     now = rtc.RTC().datetime
@@ -196,11 +172,6 @@ def write_data(temp, hum, pres, alt, aqi , resistance, light):
     except OSError as e:
         print(f"Error writing to SD card: {e}")    
 
-headers = {
-    "X-AIO-Key": AIO_KEY,
-    "Content-Type": "application/json"
-}
-
 def get_sea_level_pressure(first_run=False):
     print(f"Fetching sea level pressure for {STATION}...")
     global last_SL_pressure
@@ -208,7 +179,9 @@ def get_sea_level_pressure(first_run=False):
         gc.collect()  # Run garbage collection to free up memory before making the request
         metar_text = None   # Clear previous METAR text to avoid confusion in case of request failure
         try:
+            #print(f"Making HTTP request to {URL}...")
             response = https.get(URL, timeout=15)
+            print(f"HTTP response status: {response}")
             metar_text = response.text
             response.close()
         except (RuntimeError, OSError) as e:
@@ -273,7 +246,7 @@ led.direction = digitalio.Direction.OUTPUT
 
 
 prefix = os.getenv('FILE_PREFIX', 'AQ0')  
-file_name = "/sd/" + prefix + "_LOG" + ".csv"  # Global variable to hold the current file name for logging
+#file_name = "/sd/" + prefix + "_LOG" + ".csv"  # Global variable to hold the current file name for logging
 last_SL_pressure = SEALEVELPRESSURE_HPA  # Initialize last known sea level pressure with the default value
 gas_baseline = float(os.getenv("GAS_BASELINE", "200000"))  # This is a baseline resistance value for the gas sensor, adjust based on your environment and sensor calibration
 sendAdafruit = os.getenv("SEND_TO_ADAFRUIT", "false").lower() == "true"  # Set to True to enable sending data to Adafruit IO, False to disable
@@ -316,18 +289,27 @@ except Exception as e:
     print(f"Error mounting SD card: {e}")
     sdExists = False
 
+# ── 1. One shared pool via connection manager ─────────────────────────────────
+managed_pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
+ssl_context  = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
 
-pool = socketpool.SocketPool(wifi.radio)
-server = Server(pool, "/sd", debug=True)
-# We add a short timeout so poll() doesn't hang or crash if nothing is happening
+# ── 2. Adafruit IO HTTPS session ──────────────────────────────────────────────
+https = adafruit_requests.Session(managed_pool, ssl_context)
+
+# ── 3. Web server (reuses the same pool) ──────────────────────────────────────
+server = Server(managed_pool, "/sd", debug=True)
 server.socket_timeout = 0.1
-server.start(str(wifi.radio.ipv4_address),port=80)
+server.start(str(wifi.radio.ipv4_address), port=80)
 
-#TODO:  Add pool for Adafruit IO connection and create a function to send data to Adafruit IO if sendAdafruit is True. This will allow us to log our data to the cloud and access it remotely, as well as integrate with other services and dashboards that support Adafruit IO.
-# Set up HTTPS session
-pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
-ssl_context = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
-https = adafruit_requests.Session(pool, ssl_context)
+# ── 4. Main loop ──────────────────────────────────────────────────────────────
+while True:
+    server.poll()  # handle any incoming web requests
+    
+    # your sensor reading / Adafruit IO logic here
+    if sendAdafruit:
+        response = https.post(AIO_URL, json={"value": 100}) # Replace with actual data you want to send
+        print(f"Adafruit IO response: {response.status_code} - {response.text}")
+        response.close()
 
 
 update_RTC_from_NTP()  # Sync the RTC with NTP time at startup
@@ -335,9 +317,6 @@ update_RTC_from_NTP()  # Sync the RTC with NTP time at startup
 # Get the current time from the internal clock
 now = rtc.RTC().datetime
 
-startNewFile(file_name)
-# Open the new history file
- 
 # Format the date as YYYY-MM-DD (e.g., 2026-04-09)
 date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
 current_day = now.tm_mday  # Set to current day to start logging to the correct file
@@ -345,7 +324,7 @@ current_day = now.tm_mday  # Set to current day to start logging to the correct 
 
 # Build the filename 
 filePrefix = os.getenv("FILE_PREFIX")   
-file_name = f"/sd/{filePrefix}_{date_string}.txt"
+file_name = f"/sd/{filePrefix}_{date_string}.csv"
 
 print(f"Current filename: {file_name}")
 
@@ -390,7 +369,7 @@ print("Logging started. Press Ctrl+C to stop.\n")
 
 
 # This routine shows a simple link in your browser
-@server.route("/")
+#@server.route("/")
 def base(request: Request):
     temp, hum, pres, resistance, eCO2, TVOC = read_data(sensorType=sensorType) 
     #temp, hum, pres,eCO2, TVOC, AQI = read_data(sensorType=sensorType)
@@ -436,7 +415,7 @@ async def log_data():
     """Task to log data every {update_interval } seconds."""
     global file_name, current_day
     while True:
-        temp, hum, pres, resistance, alt, aqi, light = read_data(sensorType,500) # TODO: Pass the current sea level pressure for altitude calculations
+        temp, hum, pres, resistance, alt, aqi, light = read_data_smooth(sensorType)
         write_data(temp, hum, pres, alt, aqi, resistance, light)
         await asyncio.sleep(update_interval)
 
