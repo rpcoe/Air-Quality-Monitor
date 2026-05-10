@@ -38,7 +38,7 @@ AIO_KEY       = os.getenv("AIO_KEY")
 AIO_FEED_KEY  = os.getenv("AIO_KEY", "air-quality")
 AIO_URL       = f"https://io.adafruit.com/api/v2/{AIO_USERNAME}/feeds"
 
-SEALEVELPRESSURE_HPA = 1013.25
+slp = SEALEVELPRESSURE_HPA = 1013.26
 
 # Metar configuration
 STATION   = os.getenv('METAR_STATION')
@@ -57,9 +57,11 @@ aio_headers = {
 def update_RTC_from_NTP():
     try:
         print("Syncing time with internet...")
+        gc.collect()
         ntp = adafruit_ntp.NTP(managed_pool, tz_offset=-7)  # -7 for PDT
         rtc.RTC().datetime = ntp.datetime
         print("Clock synchronized!")
+        #adafruit_ntp.close(managed_pool)  # Close the NTP session to free resources
     except Exception as e:
         if isinstance(e, OSError) and e.args[0] == 110:  # ETIMEDOUT
             sleep(5)
@@ -72,6 +74,7 @@ def update_RTC_from_NTP():
         else:
             print(f"Could not sync time: {e}")
             print("Logging will proceed with default system time.")
+    gc.collect()
 
 
 def startNewFile(file_name):
@@ -142,7 +145,7 @@ def calculate_aqi(gas, hum):
 # FIX #4: Replace blocking sleep() in the smoothing loop with asyncio.sleep() so the
 #          web server keeps responding during the update interval.
 async def read_data_smooth(sensorType):
-    slp = get_sea_level_pressure(False)
+    #slp = get_sea_level_pressure(False)
     temp_s, hum_s, pres_s, res_s, alt_s, aqi_s, light_s = read_data(sensorType, slp)
     alpha = 0.02
 
@@ -174,71 +177,121 @@ def write_data(temp, hum, pres, alt, aqi, resistance, light):
     except OSError as e:
         print(f"Error writing to SD card: {e}")
 
-
-# FIX #5: Correct Adafruit IO send function
-#   - Uses the proper /feeds/{key}/data endpoint (set in AIO_URL above)
-#   - Sends auth headers (aio_headers)
-#   - Always closes the response
-#   - Wrapped in try/except so a failure doesn't crash the logger
-def send_to_adafruit(temp, hum, pres, aqi, alt , light):
+def send_to_adafruit(temp, hum, alt, aqi, light):
     if not sendAdafruit:
         return
+
+    try:
+        server.stop()
+    except:
+        pass
+
+    # Wait for CYW43 to fully release the TCP server socket
+    sleep(5)
     gc.collect()
-    prefix = os.getenv('FILE_PREFIX', 'AQ0')
+
+    pfx = os.getenv('FILE_PREFIX', 'aq1')
     feeds = [
-        ("aq1-temperature", temp),
-        ("{prefix}-humidity",    hum),
-        ("{prefix}-altitude",    pres),
-        ("{prefix}-aqi",         aqi),
-        ("{prefix}-light",       light),
+        (f"{pfx}-temperature", temp),
+        (f"{pfx}-humidity",    hum),
+        (f"{pfx}-altitude",    alt),
+        (f"{pfx}-aqi",         aqi),
+        (f"{pfx}-light",       light),
     ]
+
     for feed_key, value in feeds:
-       # url = f"https://io.adafruit.com/api/v2/{AIO_USERNAME}/feeds/{feed_key}/data"
-        url = f"{AIO_URL}/{feed_key}/data"
-        print(f"Sending to AIO {url}: {value}")
-        try:
-            response = https.post(url, json={"value": value}, headers=aio_headers, timeout=10)
-            print(f"AIO {feed_key}: {response.status_code}")
-            response.close()
-        except OSError as e:
-            print(f"Adafruit IO error on {feed_key}: {e}")
-            # OSError 113 = EHOSTUNREACH — network gone; skip remaining feeds this cycle
-            break
+        url = f"https://io.adafruit.com/api/v2/{AIO_USERNAME}/feeds/{feed_key}/data"
+        for attempt in range(3):
+            try:
+                gc.collect()
+                response = https.post(url, json={"value": value},
+                                      headers=aio_headers, timeout=20)
+                print(f"AIO {feed_key}: {response.status_code}")
+                response.close()
+                break
+            except OSError as e:
+                print(f"AIO {feed_key} attempt {attempt+1}: {e}")
+                sleep(3)
+                gc.collect()
+
+    _rebuild_network()
+    
+def _rebuild_network():
+    global managed_pool, ssl_context, https, server
+    sleep(1)
+    managed_pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
+    ssl_context  = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
+    https        = adafruit_requests.Session(managed_pool, ssl_context)
+    try:
+        # Recreate server object — reusing the old one after stop() can leave
+        # it in a bad internal state
+        server = Server(managed_pool, "/sd", debug=True)
+        server.socket_timeout = 1.0
+        server.start(str(wifi.radio.ipv4_address), port=80)
+        print(f"Server restarted on {wifi.radio.ipv4_address}")
+    except Exception as e:
+        print(f"Server restart FAILED: {type(e).__name__}: {e}")
 
 def get_sea_level_pressure(first_run=False):
-    global last_SL_pressure, https
-    print(f"Fetching sea level pressure for {STATION}...")
-    gc.collect()
-    metar_text = None
+    global last_SL_pressure, https, managed_pool, ssl_context
 
-    for attempt in range(3):
+    try:
+        server.stop()
+    except:
+        pass
+
+    try:
+        adafruit_connection_manager.connection_manager_close_all(managed_pool)
+    except:
+        pass
+
+    try:
+        wifi.radio.stop_station()
+        sleep(2)
+        wifi.radio.connect(
+            os.getenv('CIRCUITPY_WIFI_SSID'),
+            os.getenv('CIRCUITPY_WIFI_PASSWORD')
+        )
+    except:
+        pass
+
+    sleep(1)
+    gc.collect()
+
+    metar_text = None
+    for attempt in range(1):
         try:
-            response   = https.get(METAR_URL, timeout=15)
-            metar_text = response.text
+            raw_pool    = socketpool.SocketPool(wifi.radio)
+            raw_ssl     = ssl.create_default_context()
+            raw_session = adafruit_requests.Session(raw_pool, raw_ssl)
+            response    = raw_session.get(METAR_URL, timeout=20)
+            metar_text  = response.text
             response.close()
-            break                          # success
-        except OSError as e:
-            print(f"METAR attempt {attempt+1} failed: {e}")
-            # Rebuild the session EVERY retry — clears EINPROGRESS/DNS state
-            try:
-                https = adafruit_requests.Session(managed_pool, ssl_context)
-            except Exception as rebuild_err:
-                print(f"Session rebuild failed: {rebuild_err}")
+            break                  # silent success
+        except OSError:
+            sleep(3)
             gc.collect()
-            sleep(3)                       # give the radio time to settle
-    
+
+    managed_pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
+    ssl_context  = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
+    https        = adafruit_requests.Session(managed_pool, ssl_context)
+
+    try:
+        server.start(str(wifi.radio.ipv4_address), port=80)
+    except:
+        pass
+
     sea_level_pressure = get_pressure_robust(metar_text)
     if sea_level_pressure is None:
-        print("Using last known SLP.")
         return last_SL_pressure
 
     if not first_run:
         sea_level_pressure = 0.95 * last_SL_pressure + 0.05 * sea_level_pressure
         last_SL_pressure   = sea_level_pressure
-
-    print(f"SLP: {sea_level_pressure:.2f} hPa")
+        print(f"Updated sea level pressure: {sea_level_pressure:.2f} hPa")
+    
+    print(f"Updated sea level pressure first run: {sea_level_pressure:.2f} hPa")
     return sea_level_pressure
-
 
 def get_pressure_robust(text):
     if text is None or "METAR" not in text:
@@ -317,7 +370,7 @@ server.start(str(wifi.radio.ipv4_address), port=80)
 
 # ── NTP sync & file setup ─────────────────────────────
 update_RTC_from_NTP()
-
+server.stop()  # Stop server to free socket for NTP
 now         = rtc.RTC().datetime
 date_string = f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d}"
 current_day = now.tm_mday
@@ -426,7 +479,7 @@ async def log_data():
         # FIX #9: Adafruit IO send is now in the right place (inside the async logger)
         #          and uses the correct function with proper headers + error handling
         if sendAdafruit:
-            send_to_adafruit(temp, hum, pres, aqi, resistance, light)
+            send_to_adafruit(temp, hum, alt, aqi, light)
 
         # Every 10 cycles update sea level pressure
         count += 1
@@ -449,7 +502,10 @@ async def run_server():
             server.poll()
         except Exception as e:
             print(f"Server poll error: {e}")
-        await asyncio.sleep(0)
+        await asyncio.sleep(0.1)   # small delay to prevent 100% CPU
+
+async def run_server_Test():
+    await asyncio.sleep(5)        
 
 
 async def main():

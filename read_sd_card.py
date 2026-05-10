@@ -18,8 +18,8 @@ vfs = storage.VfsFat(sdcard)
 storage.mount(vfs, "/sd")
 
 filePrefix = os.getenv("FILE_PREFIX") 
-file_name = f"/sd/{filePrefix}_LOG.csv"  # Global variable to hold the current file name for logging
-
+#file_name = f"/sd/{filePrefix}_LOG.csv"  # Global variable to hold the current file name for logging
+file_name = f"/sd/aq1_2026-05-09.csv"
 while True:
     print("\nfile_name:", file_name)
 
@@ -29,8 +29,8 @@ while True:
         inputfile.close    
 
     #print("Finished  -  Run again? (press Enter to continue, or Ctrl+C to stop)")
-    input = input()
+    #input = input()
 
     sleep(3)  # Sleep to allow time for the file to be read before the next input
-
+    break  # Remove this break statement to allow continuous reading of the file
 print("stopped")
