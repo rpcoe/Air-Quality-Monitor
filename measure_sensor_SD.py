@@ -6,7 +6,6 @@
 # at specified intervals, while also flashing an LED to indicate activity.
 
 # TODO: Add error handling for sensor read failures, WiFi disconnections, and SD card write errors to make the system more robust.
-#  TODO:  Use i2c_scanner.py to detect which sensor is connected and set the sensorType variable accordingly, rather than relying on a manual setting in settings.toml. This would make the system more plug-and-play and reduce the chances of user error in configuration.    
 
 import gc
 
@@ -35,6 +34,9 @@ led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
 sdExists = True
+global sensor1Type
+sensor1Type = "NONE"
+
 # ── Config ────────────────────────────────────────────
 
 AIO_USERNAME  = os.getenv("AIO_USERNAME")
@@ -52,6 +54,11 @@ file_name = "/sd/" + prefix + "_LOG" + ".csv"  # Global variable to hold the cur
 last_SL_pressure = SEALEVELPRESSURE_HPA  # Initialize last known sea level pressure with the default value
 gas_baseline = float(os.getenv("GAS_BASELINE", "200000"))  # This is a baseline resistance value for the gas sensor, adjust based on your environment and sensor calibration
 sendAdafruit = os.getenv("SEND_TO_ADAFRUIT", "false").lower() == "true"  # Set to True to enable sending data to Adafruit IO, False to disable
+
+headers = {
+    "X-AIO-Key": AIO_KEY,
+    "Content-Type": "application/json"
+}
 # ──────────────────────────────────────────────────────
 
 def startNewFile(file_name):  # This will create the file and write the header if it doesn't exist 
@@ -82,47 +89,6 @@ def update_RTC_from_NTP():
             print("Logging will proceed with default system time.")
 
 
-
-# Connect to WiFi
-print("Connecting to WiFi...")
-#  set static IP address to avoid issues with changing IPs and to make it easier to access the web interface. Make sure the IP address you choose is outside the range of addresses your router assigns via DHCP to avoid conflicts. You can check your router's settings to see the DHCP range and choose an IP address that is not in that range. For example, if your router assigns addresses from
-# Retrieve strings from settings.toml
-if DHCP_ENABLE := os.getenv("DHCP_ENABLE", "true").lower() == "true":
-    print("DHCP is enabled. Connecting with dynamic IP address.")
-else:
-    ipv4 = os.getenv("IP_ADDRESS")   #ipaddress.IPv4Address("os.getenv('IP_ADDRESS')")
-    gateway = os.getenv("MY_GATEWAY")
-    netmask = os.getenv("MY_NETMASK")
-    ipv4 = ipaddress.IPv4Address(ipv4)  # Convert the string to an IPv4Address object
-    netmask = ipaddress.IPv4Address(netmask)  #netmask = ipaddress.IPv4Address("255.255.255.0")
-    gateway = ipaddress.IPv4Address(gateway)    #("192.168.254.254")  #("192.168.254.254")
-    wifi.radio.set_ipv4_address(ipv4=ipv4, netmask=netmask, gateway=gateway)
-
-    print(f"Using IP address: {ipv4}  gateway: {gateway}  netmask: {netmask}")
-
-wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
-
-print("Connected! IP:", wifi.radio.ipv4_address)
-
-# Connect to the card and mount the filesystem.
-spi = busio.SPI(board.GP18, board.GP19, board.GP16)  # SCK, MOSI, MISO
-cs = digitalio.DigitalInOut(board.GP17)  # CS pin for SD card
-try:
-
-    sdcard = adafruit_sdcard.SDCard(spi, cs)
-    vfs = storage.VfsFat(sdcard)
-    storage.mount(vfs, "/sd")
-except Exception as e:
-    print(f"Error mounting SD card: {e}")
-    sdExists = False
-
-# Set up HTTPS session
-pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
-ssl_context = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
-https = adafruit_requests.Session(pool, ssl_context)
-
-update_RTC_from_NTP()  # Sync the RTC with NTP time before starting the main loop
-
 def calculate_aqi(gas, hum):
     hum_weighting = 25
     gas_weight = 100-hum_weighting
@@ -146,16 +112,16 @@ def calculate_aqi(gas, hum):
     return min(max(iaq_score, 0), 500)  # clamp to 0–500
 
 
-def read_data_smooth(sensorType):
+def read_data_smooth(sensor1Type):
     # Initialize before the loop with first reading
     slp = get_sea_level_pressure(False)  # Get the initial sea level pressure for altitude calculations
-    temp_s, hum_s, pres_s, res_s, alt_s, aqi_s, light_s = read_data(sensorType,slp)
+    temp_s, hum_s, pres_s, res_s, alt_s, aqi_s, light_s = read_data(sensor1Type,slp)
     
     # Implement a simple moving average smoothing out short-term fluctuations.
     alpha = 0.02  # Smoothing factor, adjust between 0 and 1 (higher is less smooth but more responsive)
    
     for i in range(update_interval):
-        temp, hum, pres, resistance, alt, aqi, light = read_data(sensorType,slp)
+        temp, hum, pres, resistance, alt, aqi, light = read_data(sensor1Type,slp)
         temp_s = alpha * temp + (1 - alpha) * temp_s
         hum_s  = alpha * hum  + (1 - alpha) * hum_s
         pres_s = alpha * pres + (1 - alpha) * pres_s
@@ -172,19 +138,20 @@ def read_data_smooth(sensorType):
 
     return temp_s, hum_s, pres_s, res_s, alt_s, aqi_s, light_s   
 
-def read_data(sensorType,pres):
+def read_data(sensor1Type, pres):
     tempCalib = float(os.getenv('TEMP_CALIB', 0))
     altCalib = float(os.getenv('ALT_CALIB', 0))
     temp, hum, pres, resistance, alt, aqi, light = 0, 0, 0, 0, 0, 0, 0
+    
 
     try:
-        if sensorType == "BME280":
+        if sensor1Type == "BME280":
             temp = sensor1.temperature * 9 / 5 + 32  + tempCalib  # Convert to Fahrenheit and apply calibration
             hum = sensor1.humidity
             pres = sensor1.pressure 
             alt = (last_SL_pressure - pres) *8.33  + altCalib # Calculate altitude based on current pressure and sea level pressure in meters
             pres = pres * 0.02953 # converted to inches Hg
-        if sensorType == "BME680":
+        if sensor1Type == "BME680":
             sensor1.sea_level_pressure = last_SL_pressure # this nominal sealevel pressure is used to calculate altitude,
             temp = sensor1.temperature * 9 / 5 + 32 + tempCalib  # Convert to Fahrenheit and apply calibration
             hum = sensor1.relative_humidity
@@ -192,8 +159,8 @@ def read_data(sensorType,pres):
             alt = sensor1.altitude + altCalib # Add altitude calibration from settings.toml
             resistance = sensor1.gas  # Get the gas resistance value from the BME680
             aqi = calculate_aqi(resistance, hum)  # Calculate the AQI based on gas resistance and humidity
-        #if sensorType == "VEML7700":
-        light = sensor2.lux  # Get the light level in lux from the VEML7700
+        #if sensor2Type == "VEML7700":
+        #light = sensor2.lux  # Get the light level in lux from the VEML7700
     except Exception as e:
             print(f"Error reading sensor: {e}")  
             return 0, 0, 0, 0, 0, 0, 0
@@ -209,11 +176,6 @@ def write_data(temp, hum, pres, alt, aqi , resistance, light):
         print(f"Logged at {now}s, {temp:.1f}, {hum:.1f}, {pres:.2f}, {alt:.0f}, {aqi:.0f}, {resistance:.0f},{light:.0f}") 
     except OSError as e:
         print(f"Error writing to SD card: {e}")    
-
-headers = {
-    "X-AIO-Key": AIO_KEY,
-    "Content-Type": "application/json"
-}
 
 def send_to_adafruit(feed_name, value):
     url = f"{AIO_URL}/{feed_name}/data"
@@ -289,25 +251,90 @@ def get_pressure_robust(text):
         print(f"Parsing error: {e}")
         
     return None
+# TODO - Use i2c_scanner.py to detect which sensor is connected and set the 1 variable accordingly, rather than relying on a manual setting in settings.toml. This would make the system more plug-and-play and reduce the chances of user error in configuration.
 
+
+def initialize_sensors():
+    global  sensor1, sensor1Type
+    while not i2c.try_lock():
+        pass
+    print(
+            "I2C addresses found:",
+            [hex(device_address) for device_address in i2c.scan()],
+        )
+    I2C_addresses = [hex(device_address) for device_address in i2c.scan()]
+    i2c.unlock()
+    
+    if "0x76" in I2C_addresses:
+        sensor1Type = "BME280"       
+    elif "0x77" in I2C_addresses:
+       sensor1Type = "BME680"
+    else:
+        sensor1Type = "NONE"
+    try:
+        if sensor1Type != "NONE":
+            print(f"Initializing {sensor1Type} sensor...")
+            #sensor2 = adafruit_veml7700.VEML7700(i2c)
+
+        if sensor1Type == "BME280":
+            sensor1 = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
+        if sensor1Type == "BME680":        # ENS160 for air quality and AHT21 for temp and humidity
+            sensor1 = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x77, refresh_rate=1)
+        #if 1 == "VEML7700":
+    except Exception as e:
+        print(f"Error initializing sensors: {e}")
+        print("No valid sensor type specified. Please set SENSOR_TYPE in settings.toml to BME280, BME680, or VEML7700.")
+
+
+
+# Connect to WiFi
+print("Connecting to WiFi...")
+#  set static IP address to avoid issues with changing IPs and to make it easier to access the web interface. Make sure the IP address you choose is outside the range of addresses your router assigns via DHCP to avoid conflicts. You can check your router's settings to see the DHCP range and choose an IP address that is not in that range. For example, if your router assigns addresses from
+# Retrieve strings from settings.toml
+if DHCP_ENABLE := os.getenv("DHCP_ENABLE", "true").lower() == "true":
+    print("DHCP is enabled. Connecting with dynamic IP address.")
+else:
+    ipv4 = os.getenv("IP_ADDRESS")   #ipaddress.IPv4Address("os.getenv('IP_ADDRESS')")
+    gateway = os.getenv("MY_GATEWAY")
+    netmask = os.getenv("MY_NETMASK")
+    ipv4 = ipaddress.IPv4Address(ipv4)  # Convert the string to an IPv4Address object
+    netmask = ipaddress.IPv4Address(netmask)  #netmask = ipaddress.IPv4Address("255.255.255.0")
+    gateway = ipaddress.IPv4Address(gateway)    #("192.168.254.254")  #("192.168.254.254")
+    wifi.radio.set_ipv4_address(ipv4=ipv4, netmask=netmask, gateway=gateway)
+
+    print(f"Using IP address: {ipv4}  gateway: {gateway}  netmask: {netmask}")
+
+wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
+
+print("Connected! IP:", wifi.radio.ipv4_address)
+
+# Connect to the card and mount the filesystem.
+spi = busio.SPI(board.GP18, board.GP19, board.GP16)  # SCK, MOSI, MISO
+cs = digitalio.DigitalInOut(board.GP17)  # CS pin for SD card
+try:
+
+    sdcard = adafruit_sdcard.SDCard(spi, cs)
+    vfs = storage.VfsFat(sdcard)
+    storage.mount(vfs, "/sd")
+except Exception as e:
+    print(f"Error mounting SD card: {e}")
+    sdExists = False
+
+# Set up HTTPS session
+pool = adafruit_connection_manager.get_radio_socketpool(wifi.radio)
+ssl_context = adafruit_connection_manager.get_radio_ssl_context(wifi.radio)
+https = adafruit_requests.Session(pool, ssl_context)
+
+update_RTC_from_NTP()  # Sync the RTC with NTP time before starting the main loop
+
+i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
+sleep(1)  # Short delay to ensure I2C bus is ready
+
+initialize_sensors()
 
 # ── Main loop ─────────────────────────────────────────
-global sensorType
 last_SL_pressure = get_sea_level_pressure(True)
 count = 0  # Counter to track when to update RTC and sea level pressure
-sensorType = os.getenv("SENSOR_TYPE", "NONE").upper()  # Default to NONE if not set
-try:
-    if sensorType != "NONE":
-        i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
-        sleep(1)  # Short delay to ensure I2C bus is ready
-    if sensorType == "BME280":
-        sensor1 = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
-    if sensorType == "BME680":        # ENS160 for air quality and AHT21 for temp and humidity
-        sensor1 = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x77, refresh_rate=1)
-    #if sensorType == "VEML7700":
-    sensor2 = adafruit_veml7700.VEML7700(i2c)
-except:
-    print("No valid sensor type specified. Please set SENSOR_TYPE in settings.toml to BME280, BME680, or VEML7700.")
 
 # Check if the file already exists to decide whether to write a header
 try:
@@ -324,13 +351,13 @@ except OSError:
 
 
 # The first reading can be inaccurate, so we take an initial reading and discard it
-temp, hum, pres, altitude, eCO2, resistance, light = read_data(sensorType=sensorType,pres=last_SL_pressure)    
+temp, hum, pres, altitude, eCO2, resistance, light = read_data(sensor1Type, pres=last_SL_pressure)    
 sleep(10)  # Short delay before starting the main loop
 print("Logging started. Press Ctrl+C to stop.\n")
 
 while True:
         # Get the actual sensor readings
-    temp, hum, pres, resistance, alt, aqi, light = read_data_smooth(sensorType=sensorType)    
+    temp, hum, pres, resistance, alt, aqi, light = read_data_smooth(sensor1Type)    
     alt = alt * 3.28084 # convert to feet
 
     if count > 3600/update_interval:  # Update RTC everyhour to account for internal clock drift
