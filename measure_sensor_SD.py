@@ -28,14 +28,13 @@ import re
 import adafruit_ntp
 import rtc
 
-#print(dir(adafruit_connection_manager))
 update_interval = 220  # seconds suggest 220 when online - has to be less than 250 to guarantee one update per 5 minute cycle, can be set lower for more frequent updates if desired 
 led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 ledTime = 0.02  # seconds
 sdExists = True
-global sensor1Type
 sensor1Type = "NONE"
+sensor2Type = "NONE"
 
 # ── Config ────────────────────────────────────────────
 
@@ -112,16 +111,16 @@ def calculate_aqi(gas, hum):
     return min(max(iaq_score, 0), 500)  # clamp to 0–500
 
 
-def read_data_smooth(sensor1Type):
+def read_data_smooth(sensor1Type, sensor2Type):
     # Initialize before the loop with first reading
     slp = get_sea_level_pressure(False)  # Get the initial sea level pressure for altitude calculations
-    temp_s, hum_s, pres_s, res_s, alt_s, aqi_s, light_s = read_data(sensor1Type,slp)
+    temp_s, hum_s, pres_s, res_s, alt_s, aqi_s, light_s = read_data(sensor1Type, sensor2Type, slp)
     
     # Implement a simple moving average smoothing out short-term fluctuations.
     alpha = 0.02  # Smoothing factor, adjust between 0 and 1 (higher is less smooth but more responsive)
    
     for i in range(update_interval):
-        temp, hum, pres, resistance, alt, aqi, light = read_data(sensor1Type,slp)
+        temp, hum, pres, resistance, alt, aqi, light = read_data(sensor1Type, sensor2Type, slp)
         temp_s = alpha * temp + (1 - alpha) * temp_s
         hum_s  = alpha * hum  + (1 - alpha) * hum_s
         pres_s = alpha * pres + (1 - alpha) * pres_s
@@ -138,7 +137,7 @@ def read_data_smooth(sensor1Type):
 
     return temp_s, hum_s, pres_s, res_s, alt_s, aqi_s, light_s   
 
-def read_data(sensor1Type, pres):
+def read_data(sensor1Type, sensor2Type, pres):
     tempCalib = float(os.getenv('TEMP_CALIB', 0))
     altCalib = float(os.getenv('ALT_CALIB', 0))
     temp, hum, pres, resistance, alt, aqi, light = 0, 0, 0, 0, 0, 0, 0
@@ -159,8 +158,8 @@ def read_data(sensor1Type, pres):
             alt = sensor1.altitude + altCalib # Add altitude calibration from settings.toml
             resistance = sensor1.gas  # Get the gas resistance value from the BME680
             aqi = calculate_aqi(resistance, hum)  # Calculate the AQI based on gas resistance and humidity
-        #if sensor2Type == "VEML7700":
-        #light = sensor2.lux  # Get the light level in lux from the VEML7700
+        if sensor2Type == "VEML7700":
+            light = sensor2.lux  # Get the light level in lux from the VEML7700
     except Exception as e:
             print(f"Error reading sensor: {e}")  
             return 0, 0, 0, 0, 0, 0, 0
@@ -255,7 +254,11 @@ def get_pressure_robust(text):
 
 
 def initialize_sensors():
-    global  sensor1, sensor1Type
+    global  sensor1, sensor1Type, sensor2, sensor2Type
+
+    i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
+    sleep(1)  # Short delay to ensure I2C bus is ready
+    
     while not i2c.try_lock():
         pass
     print(
@@ -271,19 +274,26 @@ def initialize_sensors():
        sensor1Type = "BME680"
     else:
         sensor1Type = "NONE"
+
+    if "0x10" in I2C_addresses:
+        sensor2Type = "VEML7700"
+    else:
+        sensor2Type = "NONE"
     try:
         if sensor1Type != "NONE":
-            print(f"Initializing {sensor1Type} sensor...")
-            #sensor2 = adafruit_veml7700.VEML7700(i2c)
+            print(f"Initializing  {sensor1Type}, {sensor2Type} sensors...")
 
         if sensor1Type == "BME280":
             sensor1 = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)
         if sensor1Type == "BME680":        # ENS160 for air quality and AHT21 for temp and humidity
             sensor1 = adafruit_bme680.Adafruit_BME680_I2C(i2c, address=0x77, refresh_rate=1)
-        #if 1 == "VEML7700":
+        if sensor2Type == "VEML7700":
+            sensor2 = adafruit_veml7700.VEML7700(i2c, address=0x10)
+            sensor2.gain = 0  # Set gain to 1x for a wider measurement range
+            sensor2.integration_time = 100  # Set integration time to 100ms for better sensitivity in low light
     except Exception as e:
         print(f"Error initializing sensors: {e}")
-        print("No valid sensor type specified. Please set SENSOR_TYPE in settings.toml to BME280, BME680, or VEML7700.")
+        print("No valid sensor found. ")
 
 
 
@@ -327,14 +337,11 @@ https = adafruit_requests.Session(pool, ssl_context)
 
 update_RTC_from_NTP()  # Sync the RTC with NTP time before starting the main loop
 
-i2c = busio.I2C(board.GP21, board.GP20)  # SCL, SDA
-sleep(1)  # Short delay to ensure I2C bus is ready
-
 initialize_sensors()
 
-# ── Main loop ─────────────────────────────────────────
 last_SL_pressure = get_sea_level_pressure(True)
 count = 0  # Counter to track when to update RTC and sea level pressure
+
 
 # Check if the file already exists to decide whether to write a header
 try:
@@ -349,19 +356,21 @@ try:
 except OSError:
     startNewFile(file_name)  # This will create the file and write the header if it doesn't exist 
 
-
 # The first reading can be inaccurate, so we take an initial reading and discard it
-temp, hum, pres, altitude, eCO2, resistance, light = read_data(sensor1Type, pres=last_SL_pressure)    
-sleep(10)  # Short delay before starting the main loop
+temp, hum, pres, altitude, eCO2, resistance, light = read_data(sensor1Type, sensor2Type, pres=last_SL_pressure)    
+if update_interval > 50:    #If the update interval is short, we are probably testing so we can skip the delay.
+    sleep(10)  # Short delay before starting the main loop
 print("Logging started. Press Ctrl+C to stop.\n")
+
+# ── Main loop ─────────────────────────────────────────
 
 while True:
         # Get the actual sensor readings
-    temp, hum, pres, resistance, alt, aqi, light = read_data_smooth(sensor1Type)    
+    temp, hum, pres, resistance, alt, aqi, light = read_data_smooth(sensor1Type, sensor2Type)    
     alt = alt * 3.28084 # convert to feet
 
-    if count > 3600/update_interval:  # Update RTC everyhour to account for internal clock drift
-            update_RTC_from_NTP()  # Sync time every hour to keep the RTC accurate
+    if count > 86400/update_interval:  # Sync RTC every 24 hours to account for internal clock drift
+            update_RTC_from_NTP()  
             count = 0  # Reset the counter after updating sea level pressure
     count += 1  
 
